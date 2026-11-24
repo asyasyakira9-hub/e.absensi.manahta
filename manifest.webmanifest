@@ -1,6 +1,7 @@
 {
   "name": "E-Absensi MA Nahdhiyah Talun",
   "short_name": "E-Absensi MNT",
+  "description": "Sistem Absensi Digital Barcode, Database Master, dan Notifikasi WhatsApp MA Nahdhiyah Talun",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
