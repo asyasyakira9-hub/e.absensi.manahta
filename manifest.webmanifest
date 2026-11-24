@@ -1,0 +1,10 @@
+{
+  "name": "E-Absensi MA Nahdhiyah Talun",
+  "short_name": "E-Absensi MNT",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#065f46",
+  "icons": []
+}

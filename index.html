@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E-Absensi MA Nahdhiyah Talun</title>
+  <meta name="theme-color" content="#065f46" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js" defer></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: "Inter", system-ui, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; }
+    #qr-reader video { border-radius: 1rem; object-fit: cover; }
+    @media print { .no-print { display: none !important; } body { background: #ffffff !important; } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <div id="toast-box" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-xs w-full pointer-events-none"></div>
+  <div id="modal-backdrop" class="hidden fixed inset-0 z-40 bg-slate-900/60 items-center justify-center p-4">
+    <div id="modal-panel" class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] overflow-y-auto"></div>
+  </div>
+  <div id="app"></div>
+  <script>
+    const STORAGE_KEY = "e_absensi_mnt_ghpages_v1";
+    function getTodayISO() {
+      const n = new Date();
+      return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+    }
+    function getNowTime() {
+      const n = new Date();
+      return String(n.getHours()).padStart(2, "0") + ":" + String(n.getMinutes()).padStart(2, "0");
+    }
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+    function normalizeWA(p) {
+      let c = String(p || "").replace(/[^0-9]/g, "");
+      if (!c) return "";
+      if (c.startsWith("0")) c = "62" + c.slice(1);
+      else if (c.startsWith("8")) c = "62" + c;
+      return c;
+    }
+    function showToast(msg, type) {
+      try {
+        const box = document.getElementById("toast-box");
+        if (!box) return;
+        const el = document.createElement("div");
+        const cls = type === "error" ? "bg-rose-600 text-white" : (type === "info" ? "bg-slate-800 text-white" : "bg-emerald-700 text-white");
+        el.className = cls + " px-4 py-3 rounded-2xl shadow-lg text-xs font-bold pointer-events-auto transition-opacity duration-300";
+        el.textContent = msg;
+        box.appendChild(el);
+        setTimeout(function() { el.style.opacity = "0"; setTimeout(function() { el.remove(); }, 300); }, 2600);
+      } catch (e) {}
+    }
+    function openModal(html) {
+      const b = document.getElementById("modal-backdrop");
+      const p = document.getElementById("modal-panel");
+      if (!b || !p) return;
+      p.innerHTML = html;
+      b.classList.remove("hidden");
+      b.classList.add("flex");
+    }
+    function closeModal() {
+      const b = document.getElementById("modal-backdrop");
+      if (!b) return;
+      b.classList.add("hidden");
+      b.classList.remove("flex");
+    }
+    function getInitialData() {
+      const today = getTodayISO();
+      return {
+        settings: {
+          schoolName: "MA Nahdhiyah Talun",
+          schoolInitials: "MNT",
+          jamMasuk: "07:00",
+          toleransiMenit: 15,
+          jamPulang: "15:00",
+          kioskPin: "123456",
+          waSender: "6281234567890",
+          waAutoConfirm: true,
+          waMode: "direct_wa",
+          waEndpoint: "https://api.fonnte.com/send",
+          waToken: "",
+          tplMasuk: "Assalamualaikum Wr. Wb. Yth. *{nama_wali}*, ananda *{nama_siswa}* (Kelas {kelas}) telah *ABSEN MASUK* di {sekolah} pada {tanggal} pukul *{jam} WIB* ({status}).",
+          tplPulang: "Assalamualaikum Wr. Wb. Yth. *{nama_wali}*, ananda *{nama_siswa}* (Kelas {kelas}) telah *ABSEN PULANG* dari {sekolah} pada {tanggal} pukul *{jam} WIB*."
+        },
+        users: [
+          { username: "admin", pin: "1234", role: "admin", nama: "Operator Madrasah" },
+          { username: "piket", pin: "1234", role: "piket", nama: "Guru Piket" },
+          { username: "walikelas", pin: "1234", role: "walikelas", nama: "Ust. Ahmad Fauzi, S.Pd.I" },
+          { username: "walimurid", pin: "1234", role: "walimurid", nama: "Portal Wali Murid" }
+        ],
+        classes: [
+          { id: "KLS-1", nama: "X IPA 1", jenjang: "MA", tingkat: "X", jurusan: "IPA", ruang: "R.01", kapasitas: 36, hariAktif: "Senin - Sabtu", waliKelas: "Ust. Ahmad Fauzi, S.Pd.I", waliKelasId: "G-001", waWaliKelas: "628123456001", jamMasuk: "07:00", jamPulang: "15:00" },
+          { id: "KLS-2", nama: "XI IPS 1", jenjang: "MA", tingkat: "XI", jurusan: "IPS", ruang: "R.02", kapasitas: 36, hariAktif: "Senin - Sabtu", waliKelas: "Hj. Siti Aminah, M.Pd", waliKelasId: "G-002", waWaliKelas: "628123456002", jamMasuk: "07:00", jamPulang: "15:00" },
+          { id: "KLS-3", nama: "XII IPA 1", jenjang: "MA", tingkat: "XII", jurusan: "IPA", ruang: "R.03", kapasitas: 36, hariAktif: "Senin - Sabtu", waliKelas: "Drs. H. Muhammad Ridwan", waliKelasId: "G-003", waWaliKelas: "628123456003", jamMasuk: "07:00", jamPulang: "15:00" }
+        ],
+        students: [
+          { nisn: "0081234501", nama: "Ahmad Zaki Al-Farizi", kelas: "X IPA 1", namaWali: "Bpk. H. Sulaiman", waWali: "6281571112201" },
+          { nisn: "0081234502", nama: "Aisyah Putri Ramadhani", kelas: "X IPA 1", namaWali: "Ibu Hj. Fatimah", waWali: "6281571112202" },
+          { nisn: "0081234503", nama: "Muhammad Hafidz Pratama", kelas: "X IPA 1", namaWali: "Bpk. Hendra Wijaya", waWali: "6281571112203" },
+          { nisn: "0071234504", nama: "Naila Khairunnisa", kelas: "XI IPS 1", namaWali: "Ibu Sri Maryati", waWali: "6281571112204" },
+          { nisn: "0071234506", nama: "Zahra Salsabila Azzahra", kelas: "XII IPA 1", namaWali: "Bpk. Ahmad Yani", waWali: "6281571112206" }
+        ],
+        staff: [
+          { pegId: "G-001", nama: "Ust. Ahmad Fauzi, S.Pd.I", kategori: "Guru", jabatan: "Guru Fiqih & Wali Kelas X IPA 1", wa: "628123456001" },
+          { pegId: "G-002", nama: "Hj. Siti Aminah, M.Pd", kategori: "Guru", jabatan: "Guru Bahasa Arab & Wali Kelas XI IPS 1", wa: "628123456002" },
+          { pegId: "G-003", nama: "Drs. H. Muhammad Ridwan", kategori: "Guru", jabatan: "Guru Matematika & Wali Kelas XII IPA 1", wa: "628123456003" },
+          { pegId: "T-001", nama: "Nurul Hidayah, S.Kom", kategori: "Tendik", jabatan: "Operator TU & Administrasi", wa: "628123456004" }
+        ],
+        attendance: [
+          { id: "ATT-1", tanggal: today, tipe: "Siswa", kode: "0081234501", nama: "Ahmad Zaki Al-Farizi", kelasUnit: "X IPA 1", jamMasuk: "06:48", jamPulang: "", status: "Hadir" },
+          { id: "ATT-2", tanggal: today, tipe: "Siswa", kode: "0081234502", nama: "Aisyah Putri Ramadhani", kelasUnit: "X IPA 1", jamMasuk: "07:22", jamPulang: "", status: "Terlambat" }
+        ],
+        leaveRequests: [
+          { id: "IZN-1", tanggal: today, nisn: "0071234504", nama: "Naila Khairunnisa", kelas: "XI IPS 1", jenis: "Sakit", alasan: "Demam sejak semalam", status: "Menunggu" }
+        ],
+        waLogs: []
+      };
+    }
+    function loadDB() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p && p.settings && Array.isArray(p.students)) {
+            const init = getInitialData();
+            return Object.assign({}, init, p, { settings: Object.assign({}, init.settings, p.settings) });
+          }
+        }
+      } catch (e) {}
+      const init = getInitialData();
+      saveDB(init);
+      return init;
+    }
+    function saveDB(data) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data || db)); } catch (e) {}
+    }
+    let db = loadDB();
+    let session = null;
+    let activeTab = "dashboard";
+    let dbSubTab = "siswa";
+    let dbSearch = "";
+    let scanMode = "masuk";
+    let scanResult = null;
+    let kioskLocked = false;
+    let qrScanner = null;
+    let cameraActive = false;
+    let lastCode = "";
+    let lastScanTs = 0;
+    let waLogSearch = "";
+    let waLogStatusFilter = "ALL";
+    function buildParentWAMessage(student, customType, extra) {
+      if (!student) return "";
+      const ex = extra || {};
+      const today = ex.tanggal || getTodayISO();
+      const jam = ex.jam || getNowTime();
+      const status = ex.status || "Terpantau";
+      if (customType === "masuk") {
+        return db.settings.tplMasuk.split("{nama_wali}").join(student.namaWali || "Bpk/Ibu Wali Murid").split("{nama_siswa}").join(student.nama || "").split("{kelas}").join(student.kelas || "").split("{sekolah}").join(db.settings.schoolName || "MA Nahdhiyah Talun").split("{tanggal}").join(today).split("{jam}").join(jam).split("{status}").join(status);
+      }
+      if (customType === "pulang") {
+        return db.settings.tplPulang.split("{nama_wali}").join(student.namaWali || "Bpk/Ibu Wali Murid").split("{nama_siswa}").join(student.nama || "").split("{kelas}").join(student.kelas || "").split("{sekolah}").join(db.settings.schoolName || "MA Nahdhiyah Talun").split("{tanggal}").join(today).split("{jam}").join(jam);
+      }
+      if (customType === "izin") {
+        return "Assalamualaikum Wr. Wb. Yth. *" + (student.namaWali || "Bpk/Ibu Wali Murid") + "*, informasi kehadiran ananda *" + student.nama + "* (NISN: " + student.nisn + ", Kelas " + student.kelas + ") di *" + db.settings.schoolName + "* pada tanggal *" + today + "*: Status *" + status + "*" + (ex.alasan ? " (" + ex.alasan + ")" : "") + ".";
+      }
+      return "Assalamualaikum Wr. Wb. Yth. *" + (student.namaWali || "Bpk/Ibu Wali Murid") + "*, wali dari ananda *" + student.nama + "* (" + student.kelas + ") — *" + db.settings.schoolName + "*.";
+    }
+    function openWhatsAppUrl(phone, text) {
+      const norm = normalizeWA(phone);
+      if (!norm) { showToast("Nomor WhatsApp tidak valid", "error"); return; }
+      window.open("https://wa.me/" + norm + "?text=" + encodeURIComponent(text || ""), "_blank", "noopener,noreferrer");
+    }
+    async function sendWhatsAppMessage(phone, recipientName, message) {
+      const norm = normalizeWA(phone);
+      const senderNorm = normalizeWA(db.settings.waSender || "");
+      const log = { id: "WA-" + Math.floor(1000 + Math.random() * 9000), waktu: getTodayISO() + " " + getNowTime(), sender: senderNorm, penerima: recipientName, tujuan: norm, pesan: message, status: "Diproses" };
+      db.waLogs.unshift(log);
+      if (db.settings.waMode === "direct_wa" || !db.settings.waToken) { log.status = "Siap Kirim WA"; saveDB(); return; }
+      try {
+        const fd = new FormData();
+        fd.append("target", norm);
+        if (senderNorm) fd.append("sender", senderNorm);
+        fd.append("message", message);
+        fd.append("countryCode", "62");
+        const res = await fetch(db.settings.waEndpoint || "https://api.fonnte.com/send", { method: "POST", headers: { Authorization: db.settings.waToken }, body: fd });
+        log.status = res.ok ? "Terkirim API" : "Gagal API";
+      } catch (e) { log.status = "Gagal API"; }
+      saveDB();
+    }
+    async function notifyParentByNisn(nisn, msgType, extra, forceOpenWA) {
+      const st = db.students.find(function(s) { return s.nisn === nisn; });
+      if (!st) { showToast("Data siswa tidak ditemukan", "error"); return; }
+      if (!normalizeWA(st.waWali)) { showToast("Nomor WA wali belum diisi", "error"); return; }
+      const msg = buildParentWAMessage(st, msgType, extra || {});
+      await sendWhatsAppMessage(st.waWali, st.namaWali + " (Wali " + st.nama + ")", msg);
+      if (forceOpenWA !== false) openWhatsAppUrl(st.waWali, msg);
+      render();
+    }
+    function saveWASettings() {
+      const sEl = document.getElementById("set-wa-sender");
+      const aEl = document.getElementById("set-wa-auto");
+      const mEl = document.getElementById("set-wa-mode");
+      const tEl = document.getElementById("set-wa-token");
+      if (sEl) db.settings.waSender = normalizeWA(sEl.value);
+      if (aEl) db.settings.waAutoConfirm = Boolean(aEl.checked);
+      if (mEl) db.settings.waMode = mEl.value;
+      if (tEl) db.settings.waToken = tEl.value.trim();
+      saveDB();
+      showToast("Pengaturan WA & Nomor Sender disimpan");
+      render();
+    }
+    function handleLogin(u, p) {
+      const cleanU = String(u || "").trim().toLowerCase();
+      const cleanP = String(p || "").trim();
+      const found = db.users.find(function(x) { return x.username === cleanU && x.pin === cleanP; });
+      if (!found) { showToast("ID Pengguna atau PIN salah (PIN: 1234)", "error"); return; }
+      session = { username: found.username, role: found.role, nama: found.nama };
+      activeTab = found.role === "piket" ? "scan" : (found.role === "walimurid" ? "walimurid" : "dashboard");
+      render();
+    }
+    function quickLogin(role) {
+      const found = db.users.find(function(x) { return x.role === role; });
+      if (found) handleLogin(found.username, found.pin);
+    }
+    function logout() {
+      stopCamera();
+      session = null;
+      kioskLocked = false;
+      render();
+    }
+    function toggleKiosk() {
+      if (!kioskLocked) { kioskLocked = true; activeTab = "scan"; render(); return; }
+      openModal("<form onsubmit=\"unlockKiosk(event)\" class=\"p-6 space-y-4\"><h3 class=\"font-extrabold text-base\">Buka Kunci Kios</h3><p class=\"text-xs text-slate-500\">PIN Kios bawaan: <b>" + escapeHtml(db.settings.kioskPin) + "</b></p><input id=\"kiosk-pin-input\" type=\"password\" required class=\"w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm font-mono\" /><div class=\"flex justify-end gap-2\"><button type=\"button\" onclick=\"closeModal()\" class=\"px-4 py-2 rounded-xl bg-slate-100 text-xs font-bold\">Batal</button><button type=\"submit\" class=\"px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold\">Buka</button></div></form>");
+    }
+    function unlockKiosk(e) {
+      e.preventDefault();
+      const v = document.getElementById("kiosk-pin-input").value.trim();
+      if (v === db.settings.kioskPin) { kioskLocked = false; closeModal(); showToast("Kunci kios dibuka"); render(); }
+      else showToast("PIN Kios salah", "error");
+    }
+    function processScan(rawCode) {
+      const code = String(rawCode || "").trim();
+      if (!code) return;
+      const st = db.students.find(function(s) { return s.nisn === code; });
+      const pf = db.staff.find(function(x) { return x.pegId.toLowerCase() === code.toLowerCase(); });
+      if (!st && !pf) { scanResult = { ok: false, title: "Kode Tidak Terdaftar", msg: "Kode " + code + " tidak ditemukan." }; showToast("Kode tidak terdaftar", "error"); render(); return; }
+      const today = getTodayISO();
+      const now = getNowTime();
+      const kode = st ? st.nisn : pf.pegId;
+      const nama = st ? st.nama : pf.nama;
+      const tipe = st ? "Siswa" : (pf.kategori || "Guru");
+      const unit = st ? st.kelas : pf.jabatan;
+      let rec = db.attendance.find(function(a) { return a.tanggal === today && a.kode === kode; });
+      if (scanMode === "masuk") {
+        if (rec && rec.jamMasuk) { scanResult = { ok: false, title: "Sudah Absen Masuk", msg: nama + " sudah absen masuk pukul " + rec.jamMasuk }; render(); return; }
+        const kObj = st ? db.classes.find(function(c) { return c.nama === st.kelas; }) : null;
+        const tIn = (kObj && kObj.jamMasuk) ? kObj.jamMasuk : db.settings.jamMasuk;
+        const pT = tIn.split(":").map(Number);
+        const pN = now.split(":").map(Number);
+        const status = (pN[0] * 60 + pN[1]) > (pT[0] * 60 + pT[1] + Number(db.settings.toleransiMenit || 0)) ? "Terlambat" : "Hadir";
+        if (rec) { rec.jamMasuk = now; rec.status = status; }
+        else db.attendance.unshift({ id: "ATT-" + Date.now(), tanggal: today, tipe: tipe, kode: kode, nama: nama, kelasUnit: unit, jamMasuk: now, jamPulang: "", status: status });
+        let waText = ""; let opened = false;
+        if (st) {
+          waText = buildParentWAMessage(st, "masuk", { tanggal: today, jam: now, status: status });
+          sendWhatsAppMessage(st.waWali, st.namaWali + " (" + st.nama + ")", waText);
+          if (db.settings.waAutoConfirm && normalizeWA(st.waWali)) { openWhatsAppUrl(st.waWali, waText); opened = true; }
+        }
+        scanResult = { ok: true, title: "Absen Masuk (" + status + ")", msg: nama + " pukul " + now + " WIB" + (opened ? " • WA otomatis" : ""), waPhone: st ? st.waWali : "", waText: waText };
+      } else {
+        if (!rec || !rec.jamMasuk) { scanResult = { ok: false, title: "Belum Absen Masuk", msg: nama + " belum absen masuk hari ini." }; render(); return; }
+        if (rec.jamPulang) { scanResult = { ok: false, title: "Sudah Absen Pulang", msg: nama + " sudah absen pulang pukul " + rec.jamPulang }; render(); return; }
+        rec.jamPulang = now;
+        let waText = ""; let opened = false;
+        if (st) {
+          waText = buildParentWAMessage(st, "pulang", { tanggal: today, jam: now });
+          sendWhatsAppMessage(st.waWali, st.namaWali + " (" + st.nama + ")", waText);
+          if (db.settings.waAutoConfirm && normalizeWA(st.waWali)) { openWhatsAppUrl(st.waWali, waText); opened = true; }
+        }
+        scanResult = { ok: true, title: "Absen Pulang Berhasil", msg: nama + " pulang pukul " + now + " WIB" + (opened ? " • WA otomatis" : ""), waPhone: st ? st.waWali : "", waText: waText };
+      }
+      saveDB(); showToast(scanResult.title); render();
+    }
+    async function startCamera() {
+      if (cameraActive || typeof Html5Qrcode === "undefined") return;
+      try {
+        qrScanner = new Html5Qrcode("qr-reader");
+        await qrScanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 260, height: 140 } }, function(decoded) {
+          const c = String(decoded || "").trim(); const ts = Date.now();
+          if (c && (c !== lastCode || ts - lastScanTs > 2500)) { lastCode = c; lastScanTs = ts; processScan(c); }
+        }, function() {});
+        cameraActive = true; render();
+      } catch (e) { showToast("Kamera tidak dapat dibuka", "error"); }
+    }
+    async function stopCamera() {
+      if (qrScanner && cameraActive) { try { await qrScanner.stop(); await qrScanner.clear(); } catch (e) {} }
+      qrScanner = null; cameraActive = false;
+    }
+    function openStudentModal(idx) {
+      const isEdit = idx >= 0;
+      const s = isEdit ? db.students[idx] : { nisn: "", nama: "", kelas: (db.classes[0] && db.classes[0].nama) || "X IPA 1", namaWali: "", waWali: "" };
+      openModal("<form onsubmit=\"saveStudent(event," + idx + ")\" class=\"p-6 space-y-3 text-xs\"><h3 class=\"font-extrabold text-base\">" + (isEdit ? "Edit Siswa" : "Tambah Siswa") + "</h3><div><label class=\"font-bold\">NISN</label><input id=\"f-s-nisn\" required value=\"" + escapeHtml(s.nisn) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border font-mono\" /></div><div><label class=\"font-bold\">Nama Lengkap</label><input id=\"f-s-nama\" required value=\"" + escapeHtml(s.nama) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">Kelas</label><select id=\"f-s-kelas\" class=\"mt-1 w-full px-3 py-2 rounded-xl border bg-white\">" + db.classes.map(function(c) { return "<option value=\"" + escapeHtml(c.nama) + "\"" + (s.kelas === c.nama ? " selected" : "") + ">" + escapeHtml(c.nama) + "</option>"; }).join("") + "</select></div><div><label class=\"font-bold\">Wali Murid</label><input id=\"f-s-wali\" required value=\"" + escapeHtml(s.namaWali) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">No. WA Wali</label><input id=\"f-s-wa\" required value=\"" + escapeHtml(s.waWali) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border font-mono\" /></div><div class=\"flex justify-end gap-2 pt-2\"><button type=\"button\" onclick=\"closeModal()\" class=\"px-4 py-2 rounded-xl bg-slate-100 font-bold\">Batal</button><button type=\"submit\" class=\"px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold\">Simpan</button></div></form>");
+    }
+    function saveStudent(e, idx) {
+      e.preventDefault();
+      const item = { nisn: document.getElementById("f-s-nisn").value.trim(), nama: document.getElementById("f-s-nama").value.trim(), kelas: document.getElementById("f-s-kelas").value, namaWali: document.getElementById("f-s-wali").value.trim(), waWali: normalizeWA(document.getElementById("f-s-wa").value) };
+      if (idx >= 0) db.students[idx] = item; else db.students.push(item);
+      saveDB(); closeModal(); showToast("Data siswa disimpan"); render();
+    }
+    function deleteStudent(idx) { db.students.splice(idx, 1); saveDB(); showToast("Siswa dihapus", "info"); render(); }
+    function openStaffModal(idx, defKat) {
+      const isEdit = idx >= 0;
+      const nextId = (defKat === "Tendik" ? "T-" : "G-") + String(db.staff.length + 1).padStart(3, "0");
+      const st = isEdit ? db.staff[idx] : { pegId: nextId, nama: "", kategori: defKat, jabatan: "", wa: "" };
+      openModal("<form onsubmit=\"saveStaff(event," + idx + ")\" class=\"p-6 space-y-3 text-xs\"><h3 class=\"font-extrabold text-base\">" + (isEdit ? "Edit " + escapeHtml(st.kategori) : "Tambah " + escapeHtml(defKat)) + "</h3><div class=\"grid grid-cols-2 gap-2\"><div><label class=\"font-bold\">ID Pegawai</label><input id=\"f-st-id\" required value=\"" + escapeHtml(st.pegId) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border font-mono\" /></div><div><label class=\"font-bold\">Kategori</label><select id=\"f-st-kat\" class=\"mt-1 w-full px-3 py-2 rounded-xl border bg-white\"><option value=\"Guru\"" + ((st.kategori || "Guru") === "Guru" ? " selected" : "") + ">Guru</option><option value=\"Tendik\"" + (st.kategori === "Tendik" ? " selected" : "") + ">Tendik</option></select></div></div><div><label class=\"font-bold\">Nama Lengkap</label><input id=\"f-st-nama\" required value=\"" + escapeHtml(st.nama) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">Jabatan / Unit</label><input id=\"f-st-jab\" required value=\"" + escapeHtml(st.jabatan) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">No. WA</label><input id=\"f-st-wa\" required value=\"" + escapeHtml(st.wa) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border font-mono\" /></div><div class=\"flex justify-end gap-2 pt-2\"><button type=\"button\" onclick=\"closeModal()\" class=\"px-4 py-2 rounded-xl bg-slate-100 font-bold\">Batal</button><button type=\"submit\" class=\"px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold\">Simpan</button></div></form>");
+    }
+    function saveStaff(e, idx) {
+      e.preventDefault();
+      const item = { pegId: document.getElementById("f-st-id").value.trim(), kategori: document.getElementById("f-st-kat").value, nama: document.getElementById("f-st-nama").value.trim(), jabatan: document.getElementById("f-st-jab").value.trim(), wa: normalizeWA(document.getElementById("f-st-wa").value) };
+      if (idx >= 0) db.staff[idx] = item; else db.staff.push(item);
+      saveDB(); closeModal(); showToast("Data pegawai disimpan"); render();
+    }
+    function deleteStaff(idx) { db.staff.splice(idx, 1); saveDB(); showToast("Pegawai dihapus", "info"); render(); }
+    function openClassModal(idx) {
+      const isEdit = idx >= 0;
+      const c = isEdit ? db.classes[idx] : { id: "KLS-" + (db.classes.length + 1), nama: "", jenjang: "MA", tingkat: "X", jurusan: "IPA", ruang: "", kapasitas: 36, hariAktif: "Senin - Sabtu", waliKelas: "", waliKelasId: "", waWaliKelas: "", jamMasuk: db.settings.jamMasuk, jamPulang: db.settings.jamPulang };
+      openModal("<form onsubmit=\"saveClass(event," + idx + ")\" class=\"p-6 space-y-3 text-xs\"><h3 class=\"font-extrabold text-base\">" + (isEdit ? "Edit & Kustomisasi Kelas" : "Tambah Kelas") + "</h3><div class=\"grid grid-cols-2 gap-2\"><div><label class=\"font-bold\">Nama Kelas</label><input id=\"f-c-nama\" required value=\"" + escapeHtml(c.nama) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">Jenjang</label><input id=\"f-c-jenjang\" value=\"" + escapeHtml(c.jenjang || "MA") + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div></div><div class=\"grid grid-cols-3 gap-2\"><div><label class=\"font-bold\">Tingkat</label><input id=\"f-c-tingkat\" value=\"" + escapeHtml(c.tingkat || "X") + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">Jurusan</label><input id=\"f-c-jurusan\" value=\"" + escapeHtml(c.jurusan || "") + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">Ruang</label><input id=\"f-c-ruang\" value=\"" + escapeHtml(c.ruang || "") + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div></div><div class=\"grid grid-cols-2 gap-2\"><div><label class=\"font-bold\">Kapasitas</label><input id=\"f-c-kap\" type=\"number\" value=\"" + escapeHtml(c.kapasitas || 36) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">Hari Aktif KBM</label><input id=\"f-c-hari\" value=\"" + escapeHtml(c.hariAktif || "Senin - Sabtu") + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div></div><div><label class=\"font-bold\">Wali Kelas</label><input id=\"f-c-wali\" required value=\"" + escapeHtml(c.waliKelas) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">No. WA Wali Kelas</label><input id=\"f-c-wa\" value=\"" + escapeHtml(c.waWaliKelas || "") + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border font-mono\" /></div><div class=\"grid grid-cols-2 gap-2\"><div><label class=\"font-bold\">Jam Masuk</label><input id=\"f-c-in\" type=\"time\" value=\"" + escapeHtml(c.jamMasuk || db.settings.jamMasuk) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div><div><label class=\"font-bold\">Jam Pulang</label><input id=\"f-c-out\" type=\"time\" value=\"" + escapeHtml(c.jamPulang || db.settings.jamPulang) + "\" class=\"mt-1 w-full px-3 py-2 rounded-xl border\" /></div></div><div class=\"flex justify-end gap-2 pt-2\"><button type=\"button\" onclick=\"closeModal()\" class=\"px-4 py-2 rounded-xl bg-slate-100 font-bold\">Batal</button><button type=\"submit\" class=\"px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold\">Simpan</button></div></form>");
+    }
+    function saveClass(e, idx) {
+      e.preventDefault();
+      const oldN = idx >= 0 ? db.classes[idx].nama : "";
+      const newN = document.getElementById("f-c-nama").value.trim();
+      const item = { id: idx >= 0 ? db.classes[idx].id : ("KLS-" + (db.classes.length + 1)), nama: newN, jenjang: document.getElementById("f-c-jenjang").value.trim(), tingkat: document.getElementById("f-c-tingkat").value.trim(), jurusan: document.getElementById("f-c-jurusan").value.trim(), ruang: document.getElementById("f-c-ruang").value.trim(), kapasitas: Number(document.getElementById("f-c-kap").value) || 36, hariAktif: document.getElementById("f-c-hari").value.trim() || "Senin - Sabtu", waliKelas: document.getElementById("f-c-wali").value.trim(), waWaliKelas: normalizeWA(document.getElementById("f-c-wa").value), jamMasuk: document.getElementById("f-c-in").value || db.settings.jamMasuk, jamPulang: document.getElementById("f-c-out").value || db.settings.jamPulang };
+      if (idx >= 0) { db.classes[idx] = item; if (oldN && oldN !== newN) db.students.forEach(function(s) { if (s.kelas === oldN) s.kelas = newN; }); } else db.classes.push(item);
+      saveDB(); closeModal(); showToast("Data kelas disimpan"); render();
+    }
+    function deleteClass(idx) { db.classes.splice(idx, 1); saveDB(); showToast("Kelas dihapus", "info"); render(); }
+    function downloadExcelTemplate(tab) {
+      if (typeof XLSX === "undefined") { showToast("Library Excel belum siap", "error"); return; }
+      let h = []; let r = []; let fn = "Template_MNT.xlsx";
+      if (tab === "siswa") { h = ["NISN","Nama_Lengkap","Kelas","Nama_Wali_Murid","No_WA_Wali"]; r = [["0081234510","Ahmad Rizky","X IPA 1","Bpk. Ahmad","081234567890"]]; fn = "Template_Siswa_MNT.xlsx"; }
+      else if (tab === "guru" || tab === "tendik") { h = ["ID_Pegawai","Nama_Lengkap","Jabatan","No_WA"]; r = [[(tab === "tendik" ? "T-010" : "G-010"),"Nama Lengkap","Jabatan / Mapel","081234567891"]]; fn = "Template_" + tab + "_MNT.xlsx"; }
+      else { h = ["Nama_Kelas","Jenjang","Tingkat","Jurusan","Ruang","Kapasitas","Hari_Aktif","Nama_Wali_Kelas","No_WA_Wali_Kelas","Jam_Masuk","Jam_Pulang"]; r = [["X IPA 2","MA","X","IPA","R.04",36,"Senin - Sabtu","Wali Kelas","081234567892","07:00","15:00"]]; fn = "Template_Kelas_MNT.xlsx"; }
+      const ws = XLSX.utils.aoa_to_sheet([h].concat(r));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Data");
+      XLSX.writeFile(wb, fn);
+    }
+    function handleExcelUpload(ev, tab) {
+      const f = ev.target.files && ev.target.files[0]; if (!f || typeof XLSX === "undefined") return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+          rows.forEach(function(row) {
+            const nr = {}; Object.keys(row).forEach(function(k) { nr[String(k).trim().toLowerCase().replace(/\s+/g, "_")] = String(row[k] == null ? "" : row[k]).trim(); });
+            if (tab === "siswa") {
+              const nisn = nr.nisn || ""; const nama = nr.nama_lengkap || nr.nama || ""; if (!nisn || !nama) return;
+              const item = { nisn: nisn, nama: nama, kelas: nr.kelas || "X IPA 1", namaWali: nr.nama_wali_murid || nr.wali_murid || "-", waWali: normalizeWA(nr.no_wa_wali || nr.no_wa || "") };
+              const i = db.students.findIndex(function(s) { return s.nisn === nisn; }); if (i >= 0) db.students[i] = item; else db.students.push(item);
+            } else if (tab === "guru" || tab === "tendik") {
+              const pegId = nr.id_pegawai || ""; const nama = nr.nama_lengkap || nr.nama || ""; if (!pegId || !nama) return;
+              const item = { pegId: pegId, nama: nama, kategori: tab === "tendik" ? "Tendik" : "Guru", jabatan: nr.jabatan || "-", wa: normalizeWA(nr.no_wa || "") };
+              const i = db.staff.findIndex(function(s) { return s.pegId.toLowerCase() === pegId.toLowerCase(); }); if (i >= 0) db.staff[i] = item; else db.staff.push(item);
+            } else if (tab === "kelas") {
+              const nama = nr.nama_kelas || ""; if (!nama) return;
+              const item = { id: "KLS-" + (db.classes.length + 1), nama: nama, jenjang: nr.jenjang || "MA", tingkat: nr.tingkat || "X", jurusan: nr.jurusan || "", ruang: nr.ruang || "", kapasitas: Number(nr.kapasitas) || 36, hariAktif: nr.hari_aktif || "Senin - Sabtu", waliKelas: nr.nama_wali_kelas || "-", waWaliKelas: normalizeWA(nr.no_wa_wali_kelas || ""), jamMasuk: nr.jam_masuk || db.settings.jamMasuk, jamPulang: nr.jam_pulang || db.settings.jamPulang };
+              const i = db.classes.findIndex(function(c) { return c.nama.toLowerCase() === nama.toLowerCase(); }); if (i >= 0) db.classes[i] = item; else db.classes.push(item);
+            }
+          });
+          saveDB(); showToast("Import Excel berhasil"); render();
+        } catch (err) { showToast("Gagal baca Excel", "error"); }
+      };
+      reader.readAsArrayBuffer(f); ev.target.value = "";
+    }
+    function exportDatabaseExcel(tab) {
+      if (typeof XLSX === "undefined") { showToast("Library Excel belum siap", "error"); return; }
+      let rows = []; let fn = "Export_" + tab + "_" + getTodayISO() + ".xlsx";
+      if (tab === "siswa") rows = db.students;
+      else if (tab === "guru") rows = db.staff.filter(function(s) { return (s.kategori || "Guru") === "Guru"; });
+      else if (tab === "tendik") rows = db.staff.filter(function(s) { return s.kategori === "Tendik"; });
+      else rows = db.classes;
+      const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Data"); XLSX.writeFile(wb, fn);
+    }
+    function exportFullDatabaseJSON() {
+      const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "Backup_MNT_" + getTodayISO() + ".json"; a.click();
+    }
+    function downloadBarcodePDF() {
+      if (!window.jspdf || !window.jspdf.jsPDF) { showToast("Library PDF belum siap", "error"); return; }
+      const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+      doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+      doc.text("KARTU BARCODE - " + db.settings.schoolName.toUpperCase(), 14, 16);
+      let y = 26;
+      db.students.forEach(function(s) {
+        if (y > 270) { doc.addPage(); y = 20; }
+        doc.setFontSize(10); doc.text(s.nama + " (" + s.kelas + ") - NISN: " + s.nisn + " - Wali: " + s.namaWali, 14, y);
+        y += 8;
+      });
+      doc.save("Kartu_Barcode_MNT_" + getTodayISO() + ".pdf");
+      showToast("PDF barcode diunduh");
+    }
+    function inspectWALog(id) {
+      const l = db.waLogs.find(function(x) { return x.id === id; }); if (!l) return;
+      openModal("<div class=\"p-6 space-y-3 text-xs\"><h3 class=\"font-extrabold text-base\">Detail Log WA</h3><p><b>Penerima:</b> " + escapeHtml(l.penerima) + " (+" + escapeHtml(l.tujuan) + ")</p><p><b>Sender:</b> " + (l.sender ? "+" + escapeHtml(l.sender) : "-") + "</p><p class=\"p-3 rounded-xl bg-slate-50 border\">" + escapeHtml(l.pesan) + "</p><div class=\"flex justify-end gap-2\"><button onclick=\"closeModal()\" class=\"px-4 py-2 rounded-xl bg-slate-100 font-bold\">Tutup</button><button onclick=\"openWhatsAppUrl('" + escapeHtml(l.tujuan) + "', decodeURIComponent('" + encodeURIComponent(l.pesan) + "'))\" class=\"px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold\">Kirim WA</button></div></div>");
+    }
+    function renderLogin() {
+      return "<div class=\"min-h-screen bg-gradient-to-br from-emerald-950 to-teal-900 flex items-center justify-center p-4\"><div class=\"bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden\"><div class=\"bg-emerald-800 text-white p-6 text-center\"><div class=\"w-14 h-14 mx-auto rounded-2xl bg-amber-400 text-emerald-950 font-extrabold text-xl flex items-center justify-center\">" + escapeHtml(db.settings.schoolInitials) + "</div><h1 class=\"text-lg font-extrabold mt-2\">" + escapeHtml(db.settings.schoolName) + "</h1><p class=\"text-xs text-emerald-200\">Sistem Absensi & Notifikasi WA</p></div><div class=\"p-6 space-y-3\"><form onsubmit=\"event.preventDefault(); handleLogin(document.getElementById('in-u').value, document.getElementById('in-p').value);\" class=\"space-y-2.5\"><input id=\"in-u\" placeholder=\"ID Pengguna (admin / piket / walikelas / walimurid)\" class=\"w-full px-4 py-2.5 rounded-xl border text-sm\" /><input id=\"in-p\" type=\"password\" placeholder=\"PIN (1234)\" class=\"w-full px-4 py-2.5 rounded-xl border text-sm font-mono\" /><button type=\"submit\" class=\"w-full py-3 rounded-2xl bg-emerald-700 text-white font-bold text-sm\">Masuk ke Sistem</button></form><div class=\"grid grid-cols-2 gap-2 pt-2 text-xs\"><button onclick=\"quickLogin('admin')\" class=\"p-2.5 rounded-xl bg-slate-100 font-bold text-left\">🛡️ Admin</button><button onclick=\"quickLogin('piket')\" class=\"p-2.5 rounded-xl bg-slate-100 font-bold text-left\">📷 Piket / Scan</button><button onclick=\"quickLogin('walikelas')\" class=\"p-2.5 rounded-xl bg-slate-100 font-bold text-left\">📋 Wali Kelas</button><button onclick=\"quickLogin('walimurid')\" class=\"p-2.5 rounded-xl bg-amber-50 font-bold text-left\">👪 Wali Murid</button></div></div></div></div>";
+    }
+    function renderDashboard() {
+      const today = getTodayISO(); const list = db.attendance.filter(function(a) { return a.tanggal === today; });
+      return "<div class=\"space-y-4\"><div class=\"bg-emerald-800 rounded-3xl p-5 text-white flex flex-wrap justify-between items-center gap-2\"><div><span class=\"px-3 py-1 rounded-full bg-white/15 text-xs font-bold\">" + today + "</span><h2 class=\"text-xl font-extrabold mt-2\">Halo, " + escapeHtml(session.nama) + "</h2><p class=\"text-xs text-emerald-100\">Sender WA: " + (db.settings.waSender ? "+" + escapeHtml(normalizeWA(db.settings.waSender)) : "Belum diatur") + "</p></div><button onclick=\"activeTab='scan'; render();\" class=\"px-4 py-2.5 rounded-xl bg-white text-emerald-900 font-extrabold text-xs\">📷 Scan Barcode</button></div><div class=\"grid grid-cols-2 sm:grid-cols-4 gap-3\"><div class=\"bg-white p-4 rounded-2xl border\"><p class=\"text-xs text-slate-500\">Siswa Hadir</p><p class=\"text-2xl font-extrabold text-emerald-700\">" + list.filter(function(a) { return a.status === "Hadir"; }).length + "</p></div><div class=\"bg-white p-4 rounded-2xl border\"><p class=\"text-xs text-slate-500\">Terlambat</p><p class=\"text-2xl font-extrabold text-amber-600\">" + list.filter(function(a) { return a.status === "Terlambat"; }).length + "</p></div><div class=\"bg-white p-4 rounded-2xl border\"><p class=\"text-xs text-slate-500\">Total Siswa</p><p class=\"text-2xl font-extrabold\">" + db.students.length + "</p></div><div class=\"bg-white p-4 rounded-2xl border\"><p class=\"text-xs text-slate-500\">Guru & Tendik</p><p class=\"text-2xl font-extrabold text-indigo-700\">" + db.staff.length + "</p></div></div></div>";
+    }
+    function renderScan() {
+      return "<div class=\"bg-white p-5 rounded-3xl border space-y-4\"><div class=\"flex flex-wrap justify-between items-center gap-2\"><div><h2 class=\"text-lg font-extrabold\">Scan Barcode Absensi</h2><p class=\"text-xs text-slate-500\">Konfirmasi WA Otomatis: <b>" + (db.settings.waAutoConfirm ? "ON" : "OFF") + "</b></p></div><div class=\"flex gap-1.5\"><button onclick=\"db.settings.waAutoConfirm=!db.settings.waAutoConfirm; saveDB(); render();\" class=\"px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 text-xs font-bold border\">⚡ WA Otomatis</button><button onclick=\"scanMode='masuk'; render();\" class=\"px-3.5 py-1.5 rounded-xl text-xs font-bold " + (scanMode === "masuk" ? "bg-emerald-700 text-white" : "bg-slate-100") + "\">MASUK</button><button onclick=\"scanMode='pulang'; render();\" class=\"px-3.5 py-1.5 rounded-xl text-xs font-bold " + (scanMode === "pulang" ? "bg-indigo-700 text-white" : "bg-slate-100") + "\">PULANG</button></div></div>" + (scanResult ? "<div class=\"p-4 rounded-2xl border " + (scanResult.ok ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200") + "\"><p class=\"font-bold text-sm\">" + escapeHtml(scanResult.title) + "</p><p class=\"text-xs\">" + escapeHtml(scanResult.msg) + "</p></div>" : "") + "<div id=\"qr-reader\" class=\"w-full max-w-md mx-auto rounded-2xl overflow-hidden bg-slate-900 min-h-[180px] flex items-center justify-center text-slate-300 text-xs\">" + (cameraActive ? "" : "Kamera siap dinyalakan") + "</div><div class=\"flex gap-2 max-w-md mx-auto\"><button onclick=\"startCamera()\" class=\"flex-1 py-2.5 rounded-xl bg-emerald-700 text-white text-xs font-bold\">📷 Mulai Kamera</button><button onclick=\"stopCamera().then(render)\" class=\"flex-1 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-bold\">⏹ Matikan</button></div><form onsubmit=\"event.preventDefault(); processScan(document.getElementById('sc-in').value); document.getElementById('sc-in').value='';\" class=\"flex gap-2 max-w-xl mx-auto\"><input id=\"sc-in\" placeholder=\"Ketik NISN / ID Pegawai...\" class=\"flex-1 px-4 py-2.5 rounded-xl border-2 border-emerald-600 text-xs font-bold\" /><button class=\"px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-xs font-bold\">Proses</button></form></div>";
+    }
+    function renderDatabase() {
+      const q = dbSearch.toLowerCase().trim();
+      const sts = db.students.filter(function(s) { return !q || s.nisn.toLowerCase().includes(q) || s.nama.toLowerCase().includes(q) || s.kelas.toLowerCase().includes(q); });
+      const grs = db.staff.filter(function(x) { return (x.kategori || "Guru") === "Guru" && (!q || x.nama.toLowerCase().includes(q) || x.pegId.toLowerCase().includes(q)); });
+      const tds = db.staff.filter(function(x) { return x.kategori === "Tendik" && (!q || x.nama.toLowerCase().includes(q) || x.pegId.toLowerCase().includes(q)); });
+      const cls = db.classes.filter(function(c) { return !q || c.nama.toLowerCase().includes(q) || c.waliKelas.toLowerCase().includes(q); });
+      let body = "";
+      if (dbSubTab === "siswa") body = "<table class=\"w-full text-left text-xs\"><thead><tr class=\"bg-slate-50 border-b\"><th class=\"p-3\">NISN</th><th class=\"p-3\">Nama</th><th class=\"p-3\">Kelas</th><th class=\"p-3\">Wali & WA</th><th class=\"p-3 text-right\">Aksi</th></tr></thead><tbody class=\"divide-y\">" + sts.map(function(s) { const i = db.students.indexOf(s); return "<tr><td class=\"p-3 font-mono\">" + escapeHtml(s.nisn) + "</td><td class=\"p-3 font-bold\">" + escapeHtml(s.nama) + "</td><td class=\"p-3\">" + escapeHtml(s.kelas) + "</td><td class=\"p-3\">" + escapeHtml(s.namaWali) + " (+" + escapeHtml(normalizeWA(s.waWali)) + ")</td><td class=\"p-3 text-right space-x-1\"><button onclick=\"notifyParentByNisn('" + escapeHtml(s.nisn) + "', 'info', {}, true)\" class=\"px-2 py-1 rounded bg-emerald-50 text-emerald-800 font-bold\">WA</button><button onclick=\"openStudentModal(" + i + ")\" class=\"px-2 py-1 rounded bg-amber-50 text-amber-800 font-bold\">Edit</button><button onclick=\"deleteStudent(" + i + ")\" class=\"px-2 py-1 rounded bg-rose-50 text-rose-700 font-bold\">Hapus</button></td></tr>"; }).join("") + "</tbody></table>";
+      else if (dbSubTab === "guru" || dbSubTab === "tendik") { const arr = dbSubTab === "guru" ? grs : tds; body = "<table class=\"w-full text-left text-xs\"><thead><tr class=\"bg-slate-50 border-b\"><th class=\"p-3\">ID</th><th class=\"p-3\">Nama</th><th class=\"p-3\">Jabatan</th><th class=\"p-3\">WA</th><th class=\"p-3 text-right\">Aksi</th></tr></thead><tbody class=\"divide-y\">" + arr.map(function(st) { const i = db.staff.indexOf(st); return "<tr><td class=\"p-3 font-mono\">" + escapeHtml(st.pegId) + "</td><td class=\"p-3 font-bold\">" + escapeHtml(st.nama) + "</td><td class=\"p-3\">" + escapeHtml(st.jabatan) + "</td><td class=\"p-3 font-mono\">+" + escapeHtml(normalizeWA(st.wa)) + "</td><td class=\"p-3 text-right space-x-1\"><button onclick=\"openStaffModal(" + i + ", '" + escapeHtml(st.kategori || "Guru") + "')\" class=\"px-2 py-1 rounded bg-amber-50 text-amber-800 font-bold\">Edit</button><button onclick=\"deleteStaff(" + i + ")\" class=\"px-2 py-1 rounded bg-rose-50 text-rose-700 font-bold\">Hapus</button></td></tr>"; }).join("") + "</tbody></table>"; }
+      else body = "<table class=\"w-full text-left text-xs\"><thead><tr class=\"bg-slate-50 border-b\"><th class=\"p-3\">Kelas</th><th class=\"p-3\">Kustomisasi</th><th class=\"p-3\">Wali Kelas</th><th class=\"p-3\">Jam & Hari</th><th class=\"p-3 text-right\">Aksi</th></tr></thead><tbody class=\"divide-y\">" + cls.map(function(c) { const i = db.classes.indexOf(c); return "<tr><td class=\"p-3 font-bold\">" + escapeHtml(c.nama) + "</td><td class=\"p-3\">" + escapeHtml(c.jenjang || "MA") + " • " + escapeHtml(c.tingkat || "X") + " • Ruang " + escapeHtml(c.ruang || "-") + " • Kap " + escapeHtml(c.kapasitas || 36) + "</td><td class=\"p-3\">" + escapeHtml(c.waliKelas) + "</td><td class=\"p-3\">" + escapeHtml(c.jamMasuk) + "-" + escapeHtml(c.jamPulang) + " (" + escapeHtml(c.hariAktif || "Senin - Sabtu") + ")</td><td class=\"p-3 text-right space-x-1\"><button onclick=\"openClassModal(" + i + ")\" class=\"px-2 py-1 rounded bg-amber-50 text-amber-800 font-bold\">Edit/Kustom</button><button onclick=\"deleteClass(" + i + ")\" class=\"px-2 py-1 rounded bg-rose-50 text-rose-700 font-bold\">Hapus</button></td></tr>"; }).join("") + "</tbody></table>";
+      return "<div class=\"space-y-3\"><div class=\"flex flex-wrap justify-between items-center gap-2\"><h2 class=\"text-lg font-extrabold\">Database Master</h2><input value=\"" + escapeHtml(dbSearch) + "\" oninput=\"dbSearch=this.value; render();\" placeholder=\"Cari...\" class=\"px-3 py-2 rounded-xl border bg-white text-xs\" /></div><div class=\"flex flex-wrap justify-between gap-2 bg-white p-2 rounded-2xl border\"><div class=\"flex flex-wrap gap-1\"><button onclick=\"dbSubTab='siswa'; render();\" class=\"px-3 py-1.5 rounded-xl text-xs font-bold " + (dbSubTab === "siswa" ? "bg-emerald-700 text-white" : "bg-slate-100") + "\">Siswa (" + db.students.length + ")</button><button onclick=\"dbSubTab='guru'; render();\" class=\"px-3 py-1.5 rounded-xl text-xs font-bold " + (dbSubTab === "guru" ? "bg-emerald-700 text-white" : "bg-slate-100") + "\">Guru</button><button onclick=\"dbSubTab='tendik'; render();\" class=\"px-3 py-1.5 rounded-xl text-xs font-bold " + (dbSubTab === "tendik" ? "bg-emerald-700 text-white" : "bg-slate-100") + "\">Tendik</button><button onclick=\"dbSubTab='kelas'; render();\" class=\"px-3 py-1.5 rounded-xl text-xs font-bold " + (dbSubTab === "kelas" ? "bg-emerald-700 text-white" : "bg-slate-100") + "\">Kelas</button></div><div class=\"flex flex-wrap gap-1.5\"><button onclick=\"downloadExcelTemplate('" + dbSubTab + "')\" class=\"px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 text-xs font-bold border\">📥 Template</button><label class=\"px-2.5 py-1.5 rounded-xl bg-sky-50 text-sky-800 text-xs font-bold border cursor-pointer\">📤 Upload Excel<input type=\"file\" accept=\".xlsx,.xls,.csv\" onchange=\"handleExcelUpload(event, '" + dbSubTab + "')\" class=\"hidden\" /></label><button onclick=\"exportDatabaseExcel('" + dbSubTab + "')\" class=\"px-2.5 py-1.5 rounded-xl bg-indigo-50 text-indigo-800 text-xs font-bold border\">📊 Export Excel</button><button onclick=\"exportFullDatabaseJSON()\" class=\"px-2.5 py-1.5 rounded-xl bg-amber-50 text-amber-900 text-xs font-bold border\">💾 Backup JSON</button>" + (dbSubTab === "siswa" ? "<button onclick=\"openStudentModal(-1)\" class=\"px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold\">+ Siswa</button>" : (dbSubTab === "kelas" ? "<button onclick=\"openClassModal(-1)\" class=\"px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold\">+ Kelas</button>" : "<button onclick=\"openStaffModal(-1, '" + (dbSubTab === "tendik" ? "Tendik" : "Guru") + "')\" class=\"px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold\">+ Pegawai</button>")) + "</div></div><div class=\"bg-white rounded-2xl border overflow-x-auto\">" + body + "</div></div>";
+    }
+    function renderCards() {
+      setTimeout(function() {
+        if (typeof JsBarcode === "undefined") return;
+        document.querySelectorAll(".bc-svg").forEach(function(el) { try { JsBarcode(el, el.dataset.code, { format: "CODE128", width: 1.5, height: 36, displayValue: true, fontSize: 11 }); } catch (e) {} });
+      }, 40);
+      return "<div class=\"space-y-4\"><div class=\"flex flex-wrap justify-between items-center gap-2\"><h2 class=\"text-lg font-extrabold\">Kartu Barcode</h2><div class=\"no-print flex gap-2\"><button onclick=\"downloadBarcodePDF()\" class=\"px-4 py-2 rounded-xl bg-rose-700 text-white text-xs font-bold\">📄 Download Barcode (PDF)</button><button onclick=\"window.print()\" class=\"px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold\">🖨️ Cetak</button></div></div><div class=\"grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3\">" + db.students.map(function(s) { return "<div class=\"bg-white rounded-2xl border-2 border-emerald-700 p-4 space-y-1.5\"><div class=\"flex justify-between text-xs font-bold text-emerald-800\"><span>" + escapeHtml(db.settings.schoolName) + "</span><span>" + escapeHtml(s.kelas) + "</span></div><p class=\"font-bold text-sm\">" + escapeHtml(s.nama) + "</p><p class=\"text-[11px] text-slate-500\">Wali: " + escapeHtml(s.namaWali) + "</p><div class=\"flex justify-center pt-1\"><svg class=\"bc-svg\" data-code=\"" + escapeHtml(s.nisn) + "\"></svg></div></div>"; }).join("") + "</div></div>";
+    }
+    function renderReports() {
+      const q = waLogSearch.toLowerCase().trim();
+      const logs = db.waLogs.filter(function(l) { return (waLogStatusFilter === "ALL" || l.status === waLogStatusFilter) && (!q || String(l.penerima).toLowerCase().includes(q) || String(l.tujuan).toLowerCase().includes(q) || String(l.pesan).toLowerCase().includes(q)); });
+      return "<div class=\"space-y-4\"><div class=\"bg-white p-5 rounded-3xl border space-y-3\"><div class=\"flex justify-between items-center\"><h2 class=\"text-lg font-extrabold\">Laporan & Log WhatsApp</h2><button onclick=\"db.waLogs=[]; saveDB(); render();\" class=\"px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold\">Bersihkan Log</button></div><div class=\"grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs\"><div><label class=\"block text-[10px] font-bold uppercase text-slate-500 mb-1\">Nomor WA Sender</label><input id=\"set-wa-sender\" value=\"" + escapeHtml(db.settings.waSender || "") + "\" class=\"w-full px-3 py-2 rounded-xl border font-mono\" /></div><div><label class=\"block text-[10px] font-bold uppercase text-slate-500 mb-1\">Mode</label><select id=\"set-wa-mode\" class=\"w-full px-3 py-2 rounded-xl border bg-white font-bold\"><option value=\"direct_wa\"" + (db.settings.waMode === "direct_wa" ? " selected" : "") + ">Buka WA (wa.me)</option><option value=\"api_fallback\"" + (db.settings.waMode === "api_fallback" ? " selected" : "") + ">API Gateway</option></select></div><div><label class=\"block text-[10px] font-bold uppercase text-slate-500 mb-1\">Token API</label><input id=\"set-wa-token\" value=\"" + escapeHtml(db.settings.waToken || "") + "\" class=\"w-full px-3 py-2 rounded-xl border font-mono\" /></div><div class=\"flex flex-col justify-end gap-1\"><label class=\"inline-flex items-center gap-1.5 text-[11px] font-bold\"><input id=\"set-wa-auto\" type=\"checkbox\"" + (db.settings.waAutoConfirm ? " checked" : "") + " /><span>Konfirmasi WA Otomatis</span></label><button onclick=\"saveWASettings()\" class=\"py-2 rounded-xl bg-emerald-700 text-white font-bold\">Simpan WA</button></div></div><div class=\"flex gap-2 text-xs\"><input value=\"" + escapeHtml(waLogSearch) + "\" oninput=\"waLogSearch=this.value; render();\" placeholder=\"Cari log WA...\" class=\"flex-1 px-3 py-2 rounded-xl border bg-slate-50\" /><select onchange=\"waLogStatusFilter=this.value; render();\" class=\"px-3 py-2 rounded-xl border bg-white font-bold\"><option value=\"ALL\">Semua Status</option><option value=\"Siap Kirim WA\">Siap Kirim WA</option><option value=\"Terkirim API\">Terkirim API</option><option value=\"Gagal API\">Gagal API</option></select></div><div class=\"divide-y text-xs\">" + (logs.map(function(l) { return "<div class=\"py-2.5 flex justify-between items-center gap-2\"><div><p class=\"font-bold\">" + escapeHtml(l.penerima) + " (+" + escapeHtml(l.tujuan) + ") <span class=\"text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800\">" + escapeHtml(l.status) + "</span></p><p class=\"text-slate-500\">" + escapeHtml(l.pesan) + "</p></div><div class=\"flex gap-1 shrink-0\"><button onclick=\"inspectWALog('" + escapeHtml(l.id) + "')\" class=\"px-2.5 py-1 rounded bg-slate-100 font-bold\">Detail</button><button onclick=\"openWhatsAppUrl('" + escapeHtml(l.tujuan) + "', decodeURIComponent('" + encodeURIComponent(l.pesan) + "'))\" class=\"px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 font-bold\">WA</button></div></div>"; }).join("") || "<p class=\"py-4 text-center text-slate-400\">Belum ada log WA.</p>") + "</div></div></div>";
+    }
+    function render() {
+      const app = document.getElementById("app"); if (!app) return;
+      if (!session) { app.innerHTML = renderLogin(); return; }
+      const menus = [
+        { id: "dashboard", label: "Beranda", icon: "🏠" },
+        { id: "scan", label: "Scan Kios", icon: "📷" },
+        { id: "database", label: "Database", icon: "🗄️" },
+        { id: "cards", label: "Kartu Barcode", icon: "🪪" },
+        { id: "reports", label: "Laporan & WA", icon: "📊" }
+      ];
+      let c = "";
+      if (kioskLocked || activeTab === "scan") c = renderScan();
+      else if (activeTab === "dashboard") c = renderDashboard();
+      else if (activeTab === "database") c = renderDatabase();
+      else if (activeTab === "cards") c = renderCards();
+      else c = renderReports();
+      app.innerHTML = "<div class=\"min-h-screen flex flex-col\"><header class=\"no-print sticky top-0 z-30 bg-white border-b px-4 py-3\"><div class=\"max-w-5xl mx-auto flex justify-between items-center\"><div class=\"flex items-center gap-2.5\"><div class=\"w-9 h-9 rounded-xl bg-emerald-800 text-white font-extrabold text-xs flex items-center justify-center\">" + escapeHtml(db.settings.schoolInitials) + "</div><div><h1 class=\"text-sm font-extrabold\">" + escapeHtml(db.settings.schoolName) + "</h1><p class=\"text-[11px] text-slate-500\">" + escapeHtml(session.nama) + "</p></div></div><div class=\"flex gap-1.5\"><button onclick=\"toggleKiosk()\" class=\"px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100\">" + (kioskLocked ? "🔒 Kios" : "🔓 Kios") + "</button><button onclick=\"logout()\" class=\"px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 text-rose-700\">Keluar</button></div></div>" + (!kioskLocked ? "<nav class=\"flex max-w-5xl mx-auto gap-1.5 mt-2.5 pt-2 border-t overflow-x-auto\">" + menus.map(function(m) { return "<button onclick=\"activeTab='" + m.id + "'; render();\" class=\"px-3 py-1.5 rounded-xl text-xs font-bold " + (activeTab === m.id ? "bg-emerald-800 text-white" : "text-slate-600 hover:bg-slate-100") + "\">" + m.icon + " " + m.label + "</button>"; }).join("") + "</nav>" : "") + "</header><main class=\"flex-1 max-w-5xl w-full mx-auto p-4\">" + c + "</main></div>";
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", render); else render();
+  </script>
+</body>
+</html>
