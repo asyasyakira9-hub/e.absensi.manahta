@@ -1,7 +1,12 @@
-# E-Absensi MA Nahdhiyah Talun
+# E-Absensi MA Nahdhiyah Talun (Paket GitHub Pages v2)
 
-Aplikasi absensi digital barcode, database siswa/guru/tendik/kelas, ekspor/impor Excel, kartu barcode PDF, dan notifikasi WhatsApp wali murid.
+Paket ini berisi berkas siap unggah ke *root* repository GitHub Pages:
+- `index.html`: Aplikasi PWA lengkap dengan absensi barcode/QR, manajemen siswa/guru/tendik/kelas, ekspor/impor Excel, kartu barcode + QR (tanpa nama wali murid), notifikasi WhatsApp, sinkronisasi lintas perangkat otomatis, dan penyimpanan ke Google Drive.
+- `manifest.webmanifest`: Konfigurasi PWA relatif (`./`).
+- `sw.js`: *Service worker* dengan strategi *network-first* untuk aset lokal agar pembaruan cepat tampil.
+- `.nojekyll`: Menonaktifkan pemrosesan Jekyll bawaan GitHub Pages.
 
-## Publikasi GitHub Pages
-1. Letakkan `index.html`, `manifest.webmanifest`, `sw.js`, dan `.nojekyll` di root repository.
-2. Buka **Settings -> Pages**, pilih **Deploy from a branch** (`main` / `/ (root)`).
+## Cara Unggah ke GitHub
+1. Ekstrak seluruh isi file ZIP ini.
+2. Unggah semua file (`index.html`, `manifest.webmanifest`, `sw.js`, `.nojekyll`) langsung ke folder **root** repository GitHub Anda.
+3. Aktifkan GitHub Pages pada **Settings -> Pages** (*Branch: main*, *Folder: / (root)*).

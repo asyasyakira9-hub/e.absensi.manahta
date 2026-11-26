@@ -1,23 +1,24 @@
-
-
-
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>E-Absensi MA Nahdhiyah Talun</title>
-  <meta name="description" content="Sistem Absensi Digital Barcode, Database Master, dan Notifikasi WhatsApp MA Nahdhiyah Talun">
-  <meta name="theme-color" content="#065f46">
-  <link id="dynamic-manifest" rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='28' fill='%23065f46'/%3E%3Ctext x='64' y='78' font-family='Arial,sans-serif' font-size='42' font-weight='800' fill='%23fbbf24' text-anchor='middle'%3EMNT%3C/text%3E%3C/svg%3E">
-  <!-- Pustaka UI & Utilitas (SheetJS Excel, JsBarcode, html5-qrcode, jsPDF) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer=""></script>
-  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js" defer=""></script>
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer=""></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer=""></script>
+  <meta name="description" content="Sistem Absensi Digital Barcode, Database Master, Sinkronisasi Lintas Perangkat & Google Drive MA Nahdhiyah Talun" />
+  <meta name="theme-color" content="#065f46" />
+  <link id="dynamic-manifest" rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='28' fill='%23065f46'/%3E%3Ctext x='64' y='78' font-family='Arial,sans-serif' font-size='42' font-weight='800' fill='%23fbbf24' text-anchor='middle'%3EMNT%3C/text%3E%3C/svg%3E" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" defer></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
   <style>
     body {
@@ -30,35 +31,31 @@
       border-radius: 1rem;
       object-fit: cover;
     }
+    .qr-box canvas, .qr-box img {
+      margin: 0 auto;
+      border-radius: 0.5rem;
+    }
     @media print {
       .no-print { display: none !important; }
       body { background: #ffffff !important; }
     }
   </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
 
-
-
-  <!-- Wadah Toast Notifikasi -->
   <div id="toast-box" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-xs w-full pointer-events-none"></div>
 
-  <!-- Modal Global -->
   <div id="modal-backdrop" class="hidden fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-xs items-center justify-center p-4">
-    <div id="modal-panel" class="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] overflow-y-auto"></div>
+    <div id="modal-panel" class="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] overflow-y-auto"></div>
   </div>
 
-  <!-- Root Aplikasi -->
   <div id="app"></div>
 
   <script>
-    /**
-     * Kunci penyimpanan lokal di browser perangkat.
-     * Menggunakan localStorage agar data tetap bertahan saat halaman dimuat ulang atau offline.
-     */
-    const STORAGE_KEY = 'e_absensi_mnt_ghpages_v1';
+    const STORAGE_KEY = 'e_absensi_mnt_ghpages_v2';
+    const DEFAULT_SYNC_ENDPOINT = 'https://kvdb.io/mnt-nahdhiyah-talun-v1';
+    const DEFAULT_DRIVE_FOLDER_URL = 'https://drive.google.com/drive/my-drive';
 
-    /**
-     * Menghasilkan tanggal hari ini dalam format ISO (YYYY-MM-DD) sesuai waktu lokal.
-     */
     function getTodayISO() {
       const now = new Date();
       const year = now.getFullYear();
@@ -67,9 +64,6 @@
       return `${year}-${month}-${day}`;
     }
 
-    /**
-     * Menghasilkan jam saat ini dalam format HH:MM.
-     */
     function getNowTime() {
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
@@ -77,9 +71,6 @@
       return `${hours}:${minutes}`;
     }
 
-    /**
-     * Escape karakter HTML untuk mencegah XSS saat merender string dinamis.
-     */
     function escapeHtml(str) {
       return String(str == null ? '' : str)
         .replace(/&/g, '&amp;')
@@ -89,9 +80,6 @@
         .replace(/'/g, '&#39;');
     }
 
-    /**
-     * Normalisasi nomor WhatsApp Indonesia ke format internasional (628xxxxxxxxxx).
-     */
     function normalizeWA(phone) {
       let cleaned = String(phone || '').replace(/[^0-9]/g, '');
       if (!cleaned) return '';
@@ -100,9 +88,6 @@
       return cleaned;
     }
 
-    /**
-     * Menampilkan pesan notifikasi singkat (toast) di pojok kanan atas.
-     */
     function showToast(msg, type = 'success') {
       try {
         const box = document.getElementById('toast-box');
@@ -123,9 +108,6 @@
       }
     }
 
-    /**
-     * Membuka modal dengan konten HTML tertentu.
-     */
     function openModal(html) {
       const backdrop = document.getElementById('modal-backdrop');
       const panel = document.getElementById('modal-panel');
@@ -135,9 +117,6 @@
       backdrop.classList.add('flex');
     }
 
-    /**
-     * Menutup modal aktif.
-     */
     function closeModal() {
       const backdrop = document.getElementById('modal-backdrop');
       if (!backdrop) return;
@@ -145,12 +124,19 @@
       backdrop.classList.remove('flex');
     }
 
-    /**
-     * Data awal aplikasi E-Absensi MA Nahdhiyah Talun.
-     */
     function getInitialData() {
       const today = getTodayISO();
       return {
+        updatedAt: new Date().toISOString(),
+        syncMeta: {
+          roomCode: 'MNT-UTAMA',
+          cloudEnabled: true,
+          autoSync: true,
+          endpointBase: DEFAULT_SYNC_ENDPOINT,
+          driveFolderUrl: DEFAULT_DRIVE_FOLDER_URL,
+          lastSyncAt: '',
+          lastSyncStatus: 'Siap'
+        },
         settings: {
           schoolName: 'MA Nahdhiyah Talun',
           schoolInitials: 'MNT',
@@ -243,48 +229,391 @@
       };
     }
 
-    /**
-     * Memuat basis data dari localStorage; jika belum ada atau rusak, inisialisasi data awal.
-     */
+    function normalizeDBShape(parsed) {
+      const base = getInitialData();
+      return {
+        ...base,
+        ...parsed,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        syncMeta: { ...base.syncMeta, ...(parsed.syncMeta || {}) },
+        settings: { ...base.settings, ...(parsed.settings || {}) },
+        classes: Array.isArray(parsed.classes) ? parsed.classes : base.classes,
+        students: Array.isArray(parsed.students) ? parsed.students : base.students,
+        staff: Array.isArray(parsed.staff) ? parsed.staff : base.staff,
+        attendance: Array.isArray(parsed.attendance) ? parsed.attendance : base.attendance,
+        leaveRequests: Array.isArray(parsed.leaveRequests) ? parsed.leaveRequests : base.leaveRequests,
+        waLogs: Array.isArray(parsed.waLogs) ? parsed.waLogs : base.waLogs
+      };
+    }
+
     function loadDB() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (parsed && parsed.settings && Array.isArray(parsed.students)) {
-            return {
-              ...getInitialData(),
-              ...parsed,
-              settings: { ...getInitialData().settings, ...parsed.settings }
-            };
+            return normalizeDBShape(parsed);
           }
         }
       } catch (err) {
         console.warn('Gagal membaca localStorage, memakai data awal:', err);
       }
       const initial = getInitialData();
-      saveDB(initial);
+      saveDB(initial, { skipCloudPush: true });
       return initial;
     }
 
-    /**
-     * Menyimpan state basis data ke localStorage.
-     */
-    function saveDB(data = db) {
+    function saveDB(data = db, opts = {}) {
       try {
+        if (!opts.preserveUpdatedAt) {
+          data.updatedAt = new Date().toISOString();
+        }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        if (!opts.skipCloudPush && data.syncMeta && data.syncMeta.cloudEnabled && data.syncMeta.autoSync) {
+          scheduleCloudPush();
+        }
       } catch (err) {
         console.error('Gagal menyimpan ke localStorage:', err);
       }
+    }
+
+    // ==================== SINKRONISASI LINTAS PERANGKAT & GOOGLE DRIVE ====================
+
+    let cloudPushTimer = null;
+    let isSyncingNow = false;
+
+    function getSyncKeyUrl(customRoom, customBase) {
+      const base = String(customBase || (db.syncMeta && db.syncMeta.endpointBase) || DEFAULT_SYNC_ENDPOINT).replace(/\/+$/, '');
+      const room = String(customRoom || (db.syncMeta && db.syncMeta.roomCode) || 'MNT-UTAMA')
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]/g, '_') || 'MNT-UTAMA';
+      return `${base}/mnt_sync_${encodeURIComponent(room)}`;
+    }
+
+    function buildSyncSnapshot(sourceData = db) {
+      return {
+        updatedAt: sourceData.updatedAt || new Date().toISOString(),
+        school: sourceData.settings.schoolName,
+        roomCode: (sourceData.syncMeta && sourceData.syncMeta.roomCode) || 'MNT-UTAMA',
+        data: {
+          settings: sourceData.settings,
+          classes: sourceData.classes,
+          students: sourceData.students,
+          staff: sourceData.staff,
+          attendance: sourceData.attendance,
+          leaveRequests: sourceData.leaveRequests,
+          waLogs: sourceData.waLogs
+        }
+      };
+    }
+
+    function applyImportedSnapshot(payload, opts = {}) {
+      const inner = payload && payload.data && typeof payload.data === 'object' ? payload.data : payload;
+      if (!inner || (!Array.isArray(inner.students) && !Array.isArray(inner.staff) && !Array.isArray(inner.classes))) {
+        throw new Error('Struktur data sinkronisasi tidak valid.');
+      }
+      const remoteUpdated = payload.updatedAt || inner.updatedAt || new Date().toISOString();
+      const merged = normalizeDBShape({
+        ...db,
+        ...inner,
+        updatedAt: remoteUpdated,
+        syncMeta: {
+          ...db.syncMeta,
+          lastSyncAt: new Date().toLocaleTimeString('id-ID'),
+          lastSyncStatus: opts.sourceLabel || 'Tersinkron'
+        }
+      });
+      db = merged;
+      saveDB(db, { skipCloudPush: true, preserveUpdatedAt: true });
+      if (!opts.silent) {
+        showToast(`Data tersinkron (${merged.students.length} siswa, ${merged.staff.length} guru/tendik, ${merged.classes.length} kelas)`);
+        render();
+      }
+    }
+
+    function scheduleCloudPush() {
+      if (cloudPushTimer) clearTimeout(cloudPushTimer);
+      cloudPushTimer = setTimeout(() => {
+        pushToCloud(true);
+      }, 450);
+    }
+
+    async function pushToCloud(silent = false) {
+      if (!db.syncMeta || !db.syncMeta.cloudEnabled) return false;
+      const url = getSyncKeyUrl();
+      const snapshot = buildSyncSnapshot(db);
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(snapshot)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        db.syncMeta.lastSyncAt = new Date().toLocaleTimeString('id-ID');
+        db.syncMeta.lastSyncStatus = 'Terkirim ke Cloud';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+        if (!silent) {
+          showToast('Perubahan berhasil dikirim ke ruang sinkronisasi bersama');
+          render();
+        }
+        return true;
+      } catch (err) {
+        db.syncMeta.lastSyncStatus = 'Offline / Menunggu Koneksi';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+        if (!silent) {
+          showToast('Gagal mengirim ke server sync: ' + (err.message || err), 'error');
+          render();
+        }
+        return false;
+      }
+    }
+
+    async function pullFromCloud(opts = {}) {
+      const silent = Boolean(opts.silent);
+      const forceApply = Boolean(opts.forceApply);
+      if (!db.syncMeta || !db.syncMeta.cloudEnabled) {
+        if (!silent) showToast('Sinkronisasi cloud otomatis sedang dinonaktifkan.', 'info');
+        return false;
+      }
+      if (isSyncingNow) return false;
+      isSyncingNow = true;
+      const url = getSyncKeyUrl();
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        if (res.status === 404) {
+          if (opts.pushIfMissing) await pushToCloud(true);
+          isSyncingNow = false;
+          return false;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const remotePayload = await res.json();
+        const remoteTs = Date.parse(remotePayload.updatedAt || 0) || 0;
+        const localTs = Date.parse(db.updatedAt || 0) || 0;
+
+        if (forceApply || remoteTs > localTs) {
+          applyImportedSnapshot(remotePayload, { silent, sourceLabel: 'Diperbarui dari Cloud' });
+        } else if (localTs > remoteTs && opts.pushIfLocalNewer) {
+          await pushToCloud(true);
+        } else {
+          db.syncMeta.lastSyncAt = new Date().toLocaleTimeString('id-ID');
+          db.syncMeta.lastSyncStatus = 'Sudah Terbaru';
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+          if (!silent) {
+            showToast('Data sudah paling baru di perangkat ini');
+            render();
+          }
+        }
+        isSyncingNow = false;
+        return true;
+      } catch (err) {
+        db.syncMeta.lastSyncStatus = 'Mode Lokal (Cache)';
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+        if (!silent) {
+          showToast('Belum terhubung ke server sync, memakai data lokal.', 'info');
+          render();
+        }
+        isSyncingNow = false;
+        return false;
+      }
+    }
+
+    async function syncNowBidirectional() {
+      showToast('Menyinkronkan data antarperangkat...', 'info');
+      await pullFromCloud({ silent: false, pushIfLocalNewer: true, pushIfMissing: true });
+    }
+
+    function saveSyncSettings(e) {
+      if (e) e.preventDefault();
+      const roomEl = document.getElementById('sync-room');
+      const cloudEl = document.getElementById('sync-cloud-enabled');
+      const autoEl = document.getElementById('sync-auto');
+      const baseEl = document.getElementById('sync-endpoint');
+      const driveEl = document.getElementById('sync-drive-url');
+
+      if (roomEl) db.syncMeta.roomCode = roomEl.value.trim() || 'MNT-UTAMA';
+      if (cloudEl) db.syncMeta.cloudEnabled = Boolean(cloudEl.checked);
+      if (autoEl) db.syncMeta.autoSync = Boolean(autoEl.checked);
+      if (baseEl) db.syncMeta.endpointBase = baseEl.value.trim() || DEFAULT_SYNC_ENDPOINT;
+      if (driveEl) db.syncMeta.driveFolderUrl = driveEl.value.trim() || DEFAULT_DRIVE_FOLDER_URL;
+
+      saveDB(db, { skipCloudPush: true });
+      showToast('Pengaturan Sinkronisasi & Google Drive disimpan');
+      pullFromCloud({ silent: true, pushIfLocalNewer: true, pushIfMissing: true });
+      render();
+    }
+
+    function encodeSyncTransferCode() {
+      const snap = buildSyncSnapshot(db);
+      const jsonStr = JSON.stringify(snap);
+      const bytes = new TextEncoder().encode(jsonStr);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return 'MNT-SYNC-V2:' + btoa(bin);
+    }
+
+    function decodeSyncTransferCode(rawCode) {
+      let clean = String(rawCode || '').trim();
+      if (clean.startsWith('MNT-SYNC-V2:')) {
+        clean = clean.slice('MNT-SYNC-V2:'.length);
+      }
+      const bin = atob(clean);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const jsonStr = new TextDecoder().decode(bytes);
+      return JSON.parse(jsonStr);
+    }
+
+    function copySyncCodeToClipboard() {
+      const code = encodeSyncTransferCode();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(() => {
+          showToast('Kode paket data disalin ke clipboard! Tempel di perangkat lain.');
+        }).catch(() => {
+          const ta = document.getElementById('sync-code-box');
+          if (ta) { ta.value = code; ta.select(); }
+          showToast('Kode siap disalin manual dari kotak teks', 'info');
+        });
+      } else {
+        const ta = document.getElementById('sync-code-box');
+        if (ta) { ta.value = code; ta.select(); }
+        showToast('Kode siap disalin manual dari kotak teks', 'info');
+      }
+    }
+
+    function applySyncCodeFromBox() {
+      const ta = document.getElementById('sync-code-box');
+      if (!ta || !ta.value.trim()) {
+        showToast('Tempelkan kode sinkronisasi terlebih dahulu.', 'error');
+        return;
+      }
+      try {
+        const parsed = decodeSyncTransferCode(ta.value.trim());
+        applyImportedSnapshot(parsed, { sourceLabel: 'Impor Kode Perangkat' });
+        if (db.syncMeta.cloudEnabled) pushToCloud(true);
+      } catch (err) {
+        showToast('Kode sinkronisasi tidak valid: ' + (err.message || err), 'error');
+      }
+    }
+
+    function getDriveJSONFileName() {
+      const cleanSchool = String(db.settings.schoolName || 'MA_Nahdhiyah_Talun').replace(/[^a-zA-Z0-9_-]+/g, '_');
+      return `E-Absensi_${cleanSchool}_${getTodayISO()}.json`;
+    }
+
+    function saveAndOpenGoogleDrive() {
+      const fileName = getDriveJSONFileName();
+      const payload = buildSyncSnapshot(db);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1200);
+
+      const driveUrl = (db.syncMeta && db.syncMeta.driveFolderUrl) || DEFAULT_DRIVE_FOLDER_URL;
+      window.open(driveUrl, '_blank', 'noopener,noreferrer');
+      showToast(`File ${fileName} diunduh & Google Drive dibuka. Unggah file tersebut ke folder Drive Anda.`);
+    }
+
+    function handleDriveBackupFileUpload(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const parsed = JSON.parse(String(e.target.result || ''));
+          applyImportedSnapshot(parsed, { sourceLabel: 'Pulihkan dari File Drive/JSON' });
+          if (db.syncMeta.cloudEnabled) pushToCloud(true);
+        } catch (err) {
+          showToast('Gagal memuat file JSON cadangan: ' + (err.message || err), 'error');
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
+    function openSyncModal() {
+      const roomVal = (db.syncMeta && db.syncMeta.roomCode) || 'MNT-UTAMA';
+      const cloudChecked = db.syncMeta && db.syncMeta.cloudEnabled ? 'checked' : '';
+      const autoChecked = db.syncMeta && db.syncMeta.autoSync ? 'checked' : '';
+      const endpointVal = (db.syncMeta && db.syncMeta.endpointBase) || DEFAULT_SYNC_ENDPOINT;
+      const driveUrlVal = (db.syncMeta && db.syncMeta.driveFolderUrl) || DEFAULT_DRIVE_FOLDER_URL;
+      const lastSyncText = (db.syncMeta && db.syncMeta.lastSyncAt)
+        ? `${escapeHtml(db.syncMeta.lastSyncAt)} (${escapeHtml(db.syncMeta.lastSyncStatus || '-')})`
+        : 'Belum ada sinkronisasi';
+
+      openModal(`
+        <div class="p-6 space-y-4 text-xs">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h3 class="font-extrabold text-base text-slate-900">🔄 Sinkronisasi Lintas Perangkat & Google Drive</h3>
+              <p class="text-[11px] text-slate-500">Status: <b class="text-emerald-700">${lastSyncText}</b> • Terakhir diubah: <span class="font-mono">${escapeHtml(db.updatedAt || '-')}</span></p>
+            </div>
+            <button type="button" onclick="closeModal()" class="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick="syncNowBidirectional()" class="flex-1 py-2.5 px-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold">⚡ Sinkronkan Sekarang</button>
+            <button type="button" onclick="saveAndOpenGoogleDrive()" class="flex-1 py-2.5 px-3 rounded-xl bg-sky-700 hover:bg-sky-800 text-white font-extrabold">☁️ Simpan & Buka Google Drive</button>
+            <label class="py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold cursor-pointer">
+              📂 Muat JSON Drive
+              <input type="file" accept=".json,application/json" onchange="handleDriveBackupFileUpload(event)" class="hidden" />
+            </label>
+          </div>
+
+          <form onsubmit="saveSyncSettings(event)" class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+            <p class="font-extrabold text-slate-800">Pengaturan Ruang Sinkronisasi Bersama (HP & Laptop)</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10px] font-bold uppercase text-slate-500 mb-1">Kode Ruang Sinkronisasi</label>
+                <input id="sync-room" value="${escapeHtml(roomVal)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono font-bold" />
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold uppercase text-slate-500 mb-1">Link Folder / Google Drive</label>
+                <input id="sync-drive-url" value="${escapeHtml(driveUrlVal)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-slate-500 mb-1">Endpoint Cloud Sinkronisasi</label>
+              <input id="sync-endpoint" value="${escapeHtml(endpointVal)}" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono text-[11px]" />
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <div class="flex flex-wrap gap-3">
+                <label class="inline-flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
+                  <input id="sync-cloud-enabled" type="checkbox" ${cloudChecked} class="rounded border-slate-300 text-emerald-700" />
+                  <span>Aktifkan Sync Cloud</span>
+                </label>
+                <label class="inline-flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
+                  <input id="sync-auto" type="checkbox" ${autoChecked} class="rounded border-slate-300 text-emerald-700" />
+                  <span>Auto-Sync saat Edit & Buka</span>
+                </label>
+              </div>
+              <button type="submit" class="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold">Simpan Pengaturan</button>
+            </div>
+          </form>
+
+          <div class="p-3.5 rounded-2xl bg-emerald-50/50 border border-emerald-200 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <p class="font-extrabold text-slate-800">Transfer Cepat via Kode Data (Bila Offline / Firewall)</p>
+              <button type="button" onclick="copySyncCodeToClipboard()" class="px-3 py-1 rounded-lg bg-emerald-700 text-white font-bold">📋 Salin Kode Data</button>
+            </div>
+            <textarea id="sync-code-box" rows="2" placeholder="Klik 'Salin Kode Data' di perangkat sumber, lalu tempel di sini pada perangkat tujuan..." class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-mono text-[11px]"></textarea>
+            <div class="flex justify-end">
+              <button type="button" onclick="applySyncCodeFromBox()" class="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold">📥 Terapkan Kode Tempelan</button>
+            </div>
+          </div>
+        </div>
+      `);
     }
 
     // State aplikasi global
     let db = loadDB();
     let session = null;
     let activeTab = 'dashboard';
-    let dbSubTab = 'siswa'; // siswa | guru | tendik | kelas
+    let dbSubTab = 'siswa';
     let dbSearch = '';
-    let scanMode = 'masuk'; // masuk | pulang
+    let scanMode = 'masuk';
     let scanResult = null;
     let kioskLocked = false;
     let qrScanner = null;
@@ -294,9 +623,6 @@
     let waLogSearch = '';
     let waLogStatusFilter = 'ALL';
 
-    /**
-     * Membentuk pesan WhatsApp personal untuk wali murid berdasarkan data siswa dan kondisi absensi/status.
-     */
     function buildParentWAMessage(student, customType = 'info', extra = {}) {
       if (!student) return '';
       const today = extra.tanggal || getTodayISO();
@@ -331,9 +657,6 @@
       return `Assalamualaikum Wr. Wb. Yth. *${student.namaWali || 'Bpk/Ibu Wali Murid'}*, wali dari ananda *${student.nama}* (NISN: ${student.nisn}, Kelas ${student.kelas}) — *${db.settings.schoolName}*.`;
     }
 
-    /**
-     * Mengirim pesan WA ke wali murid siswa tertentu (mencatat log, memanggil API jika aktif, dan membuka WA bila diperlukan).
-     */
     async function notifyParentByNisn(nisn, msgType = 'info', extra = {}, forceOpenWA = true) {
       const student = db.students.find(s => s.nisn === nisn);
       if (!student) {
@@ -352,9 +675,6 @@
       render();
     }
 
-    /**
-     * Membuka tautan WhatsApp (wa.me) dengan pesan terisi otomatis.
-     */
     function openWhatsAppUrl(phone, text) {
       const norm = normalizeWA(phone);
       if (!norm) {
@@ -365,9 +685,6 @@
       window.open(url, '_blank', 'noopener,noreferrer');
     }
 
-    /**
-     * Mencatat log notifikasi WhatsApp (termasuk nomor Sender) dan mengirim via API Gateway jika dikonfigurasi.
-     */
     async function sendWhatsAppMessage(phone, recipientName, message) {
       const norm = normalizeWA(phone);
       const senderNorm = normalizeWA(db.settings.waSender || '');
@@ -406,9 +723,6 @@
       saveDB();
     }
 
-    /**
-     * Menyimpan pengaturan WhatsApp (Nomor Sender, Konfirmasi Otomatis, Mode & Token).
-     */
     function saveWASettings() {
       const senderEl = document.getElementById('set-wa-sender');
       const autoEl = document.getElementById('set-wa-auto');
@@ -425,9 +739,6 @@
       render();
     }
 
-    /**
-     * Proses login pengguna berdasarkan ID dan PIN.
-     */
     function handleLogin(username, pin) {
       const cleanUser = String(username || '').trim().toLowerCase();
       const cleanPin = String(pin || '').trim();
@@ -438,20 +749,15 @@
       }
       session = { username: found.username, role: found.role, nama: found.nama };
       activeTab = found.role === 'piket' ? 'scan' : (found.role === 'walimurid' ? 'walimurid' : 'dashboard');
+      pullFromCloud({ silent: true, pushIfLocalNewer: true });
       render();
     }
 
-    /**
-     * Login cepat berdasarkan peran.
-     */
     function quickLogin(role) {
       const found = db.users.find(u => u.role === role);
       if (found) handleLogin(found.username, found.pin);
     }
 
-    /**
-     * Keluar dari sesi aktif dan menghentikan kamera bila menyala.
-     */
     function logout() {
       stopCamera();
       session = null;
@@ -459,9 +765,6 @@
       render();
     }
 
-    /**
-     * Mengunci atau membuka kunci mode kios.
-     */
     function toggleKiosk() {
       if (!kioskLocked) {
         kioskLocked = true;
@@ -482,9 +785,6 @@
       }
     }
 
-    /**
-     * Validasi PIN untuk membuka kunci mode kios.
-     */
     function unlockKiosk(e) {
       e.preventDefault();
       const inputEl = document.getElementById('kiosk-pin-input');
@@ -499,9 +799,6 @@
       }
     }
 
-    /**
-     * Memproses kode hasil scan barcode/QR atau input manual untuk absen masuk/pulang.
-     */
     function processScan(rawCode) {
       const code = String(rawCode || '').trim();
       if (!code) return;
@@ -630,9 +927,6 @@
       render();
     }
 
-    /**
-     * Menyalakan pemindai kamera menggunakan html5-qrcode.
-     */
     async function startCamera() {
       if (cameraActive) return;
       if (typeof Html5Qrcode === 'undefined') {
@@ -662,9 +956,6 @@
       }
     }
 
-    /**
-     * Menghentikan pemindai kamera aktif.
-     */
     async function stopCamera() {
       if (qrScanner && cameraActive) {
         try {
@@ -725,7 +1016,7 @@
       else db.students.push(item);
       saveDB();
       closeModal();
-      showToast(idx >= 0 ? 'Data siswa diperbarui' : 'Siswa baru ditambahkan');
+      showToast(idx >= 0 ? 'Data siswa diperbarui & disinkronkan' : 'Siswa baru ditambahkan & disinkronkan');
       render();
     }
 
@@ -784,7 +1075,7 @@
       else db.staff.push(item);
       saveDB();
       closeModal();
-      showToast(`Data ${item.kategori} disimpan`);
+      showToast(`Data ${item.kategori} disimpan & disinkronkan`);
       render();
     }
 
@@ -850,13 +1141,7 @@
             </div>
             <div>
               <label class="font-bold text-slate-700">Hari Aktif KBM</label>
-              <input id="f-c-hari" value="${escapeHtml(c.hariAktif || 'Senin - Sabtu')}" placeholder="Contoh: Senin - Sabtu atau Senin, Selasa, Rabu" class="mt-1 w-full px-3.5 py-2.5 rounded-xl border border-slate-300" />
-              <div class="flex flex-wrap gap-1 mt-1.5">
-                ${['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Ahad'].map(h => `
-                  <button type="button" onclick="toggleHariAktif('${h}')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-emerald-100 text-slate-700 hover:text-emerald-900 text-[10px] font-bold border border-slate-200">+ ${h}</button>
-                `).join('')}
-                <button type="button" onclick="document.getElementById('f-c-hari').value='Senin - Sabtu'" class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-bold">Sen-Sab</button>
-              </div>
+              <input id="f-c-hari" value="${escapeHtml(c.hariAktif || 'Senin - Sabtu')}" class="mt-1 w-full px-3.5 py-2.5 rounded-xl border border-slate-300" />
             </div>
             <div>
               <label class="font-bold text-slate-700">Pilih Wali Kelas (Opsional dari Data Guru)</label>
@@ -885,21 +1170,6 @@
       if (!g) return;
       document.getElementById('f-c-wali').value = g.nama;
       document.getElementById('f-c-wa').value = g.wa;
-    }
-
-    function toggleHariAktif(day) {
-      const inp = document.getElementById('f-c-hari');
-      if (!inp) return;
-      const cur = inp.value.trim();
-      if (!cur || cur.includes(' - ')) {
-        inp.value = day;
-        return;
-      }
-      const parts = cur.split(',').map(s => s.trim()).filter(Boolean);
-      const idx = parts.indexOf(day);
-      if (idx >= 0) parts.splice(idx, 1);
-      else parts.push(day);
-      inp.value = parts.join(', ');
     }
 
     function saveClass(e, idx) {
@@ -931,7 +1201,7 @@
       }
       saveDB();
       closeModal();
-      showToast(idx >= 0 ? 'Data & kustomisasi kelas diperbarui' : 'Kelas baru ditambahkan');
+      showToast(idx >= 0 ? 'Data kelas diperbarui & disinkronkan' : 'Kelas baru ditambahkan & disinkronkan');
       render();
     }
 
@@ -942,7 +1212,7 @@
       render();
     }
 
-    // ==================== TEMPLATE & IMPORT / EXPORT EXCEL (.XLSX) ====================
+    // ==================== EXCEL & BARCODE + QR ====================
 
     function downloadExcelTemplate(tab) {
       if (typeof XLSX === 'undefined') {
@@ -1191,19 +1461,7 @@
 
     function exportFullDatabaseJSON() {
       const dateStr = getTodayISO();
-      const payload = {
-        exportedAt: new Date().toISOString(),
-        school: db.settings.schoolName,
-        data: {
-          settings: db.settings,
-          classes: db.classes,
-          students: db.students,
-          staff: db.staff,
-          attendance: db.attendance,
-          leaveRequests: db.leaveRequests,
-          waLogs: db.waLogs
-        }
-      };
+      const payload = buildSyncSnapshot(db);
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -1214,9 +1472,6 @@
       showToast('Backup lengkap (.json) berhasil diunduh');
     }
 
-    /**
-     * Mengonversi elemen <svg> barcode menjadi data URL PNG beresolusi tinggi untuk disematkan ke PDF.
-     */
     function svgElementToPngDataUrl(svgEl) {
       return new Promise((resolve) => {
         try {
@@ -1257,9 +1512,41 @@
       });
     }
 
-    /**
-     * Membuat dan mengunduh lembar kartu barcode dalam format PDF (.pdf).
-     */
+    function hydrateCardCodes() {
+      if (typeof JsBarcode !== 'undefined') {
+        document.querySelectorAll('.bc-svg').forEach(el => {
+          try {
+            JsBarcode(el, el.dataset.code, {
+              format: 'CODE128',
+              lineColor: '#0f172a',
+              width: 1.65,
+              height: 40,
+              displayValue: true,
+              fontSize: 11,
+              margin: 2
+            });
+          } catch (err) {}
+        });
+      }
+      if (typeof QRCode !== 'undefined') {
+        document.querySelectorAll('.qr-box').forEach(box => {
+          const code = box.dataset.code || '';
+          if (!code) return;
+          box.innerHTML = '';
+          try {
+            new QRCode(box, {
+              text: code,
+              width: 68,
+              height: 68,
+              colorDark: '#0f172a',
+              colorLight: '#ffffff',
+              correctLevel: QRCode.CorrectLevel.M
+            });
+          } catch (err) {}
+        });
+      }
+    }
+
     async function downloadBarcodePDF() {
       try {
         const jsPdfLib = window.jspdf && window.jspdf.jsPDF;
@@ -1268,20 +1555,14 @@
           return;
         }
 
-        if (typeof JsBarcode !== 'undefined') {
-          document.querySelectorAll('.bc-svg').forEach(el => {
-            try {
-              JsBarcode(el, el.dataset.code, { format: 'CODE128', width: 1.6, height: 42, displayValue: true, fontSize: 12, margin: 2 });
-            } catch (err) {}
-          });
-        }
+        hydrateCardCodes();
 
         const cards = [
           ...db.students.map(s => ({
             code: s.nisn,
             nama: s.nama,
             badge: s.kelas,
-            sub: `NISN: ${s.nisn}`,
+            sub: `ID: ${s.nisn} • SISWA`,
             accent: [6, 95, 70]
           })),
           ...db.staff.map(st => ({
@@ -1379,16 +1660,14 @@
           const bcBoxH = Math.max(18, cardH - 23);
           const bcBoxW = cardW - 6;
           if (imgInfo && imgInfo.dataUrl) {
-            const maxW = bcBoxW;
-            const maxH = bcBoxH;
-            let drawW = maxW;
+            let drawW = bcBoxW;
             let drawH = drawW / (imgInfo.ratio || 3);
-            if (drawH > maxH) {
-              drawH = maxH;
+            if (drawH > bcBoxH) {
+              drawH = bcBoxH;
               drawW = drawH * (imgInfo.ratio || 3);
             }
-            const drawX = x + 3 + (maxW - drawW) / 2;
-            const drawY = bcBoxY + (maxH - drawH) / 2;
+            const drawX = x + 3 + (bcBoxW - drawW) / 2;
+            const drawY = bcBoxY + (bcBoxH - drawH) / 2;
             doc.addImage(imgInfo.dataUrl, 'PNG', drawX, drawY, drawW, drawH);
           } else {
             doc.setFont('courier', 'bold');
@@ -1423,7 +1702,7 @@
         status: 'Menunggu'
       });
       saveDB();
-      showToast('Pengajuan izin berhasil dikirim!');
+      showToast('Pengajuan izin berhasil dikirim & disinkronkan!');
       render();
     }
 
@@ -1465,9 +1744,6 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
-    /**
-     * Menampilkan rincian lengkap satu entri log WhatsApp di dalam modal.
-     */
     function inspectWALog(logId) {
       const entry = db.waLogs.find(l => l.id === logId);
       if (!entry) {
@@ -1501,9 +1777,6 @@
       `);
     }
 
-    /**
-     * Menghapus seluruh riwayat log WhatsApp setelah konfirmasi singkat di modal.
-     */
     function confirmClearWALogs() {
       if (!db.waLogs.length) {
         showToast('Log WhatsApp sudah kosong', 'info');
@@ -1532,7 +1805,7 @@
                 ${escapeHtml(db.settings.schoolInitials)}
               </div>
               <h1 class="text-xl font-extrabold mt-3">${escapeHtml(db.settings.schoolName)}</h1>
-              <p class="text-xs text-emerald-200 mt-1">Sistem Absensi Digital & Notifikasi WhatsApp</p>
+              <p class="text-xs text-emerald-200 mt-1">Sistem Absensi Digital, Sinkron Lintas Perangkat & Google Drive</p>
             </div>
             <div class="p-6 space-y-4">
               <form onsubmit="event.preventDefault(); handleLogin(document.getElementById('in-user').value, document.getElementById('in-pin').value);" class="space-y-3">
@@ -1558,11 +1831,12 @@
     function renderDashboard() {
       const today = getTodayISO();
       const todayList = db.attendance.filter(a => a.tanggal === today);
+      const roomCode = (db.syncMeta && db.syncMeta.roomCode) || 'MNT-UTAMA';
       return `
         <div class="space-y-5">
           <div class="bg-gradient-to-r from-emerald-800 to-teal-700 rounded-3xl p-5 text-white shadow-md flex flex-wrap items-center justify-between gap-3">
             <div>
-              <span class="px-3 py-1 rounded-full bg-white/15 text-xs font-bold">${today}</span>
+              <span class="px-3 py-1 rounded-full bg-white/15 text-xs font-bold">${today} • Ruang Sync: ${escapeHtml(roomCode)}</span>
               <h2 class="text-xl font-extrabold mt-2">Halo, ${escapeHtml(session.nama)}</h2>
               <p class="text-xs text-emerald-100 mt-0.5">Jam Masuk: ${escapeHtml(db.settings.jamMasuk)} WIB • Jam Pulang: ${escapeHtml(db.settings.jamPulang)} WIB • Sender WA: ${db.settings.waSender ? '+' + escapeHtml(normalizeWA(db.settings.waSender)) : 'Belum diatur'}</p>
             </div>
@@ -1676,7 +1950,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <h2 class="text-xl font-extrabold text-slate-900">Database Siswa, Guru, Tendik & Kelas</h2>
-              <p class="text-xs text-slate-500">Tambah, edit, dan kelola seluruh data induk madrasah.</p>
+              <p class="text-xs text-slate-500">Tambah, edit, dan kelola seluruh data induk madrasah (tersinkron otomatis ke ruang sync).</p>
             </div>
             <input type="text" value="${escapeHtml(dbSearch)}" oninput="dbSearch=this.value; render();" placeholder="Cari NISN, Nama, ID, Kelas..." class="px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs w-full sm:w-64" />
           </div>
@@ -1690,12 +1964,13 @@
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
-              <button onclick="downloadExcelTemplate('${dbSubTab}')" class="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold">📥 Unduh Template Excel</button>
+              <button onclick="downloadExcelTemplate('${dbSubTab}')" class="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold">📥 Template Excel</button>
               <label class="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold cursor-pointer">
-                📤 Unggah Excel (.xlsx)
+                📤 Unggah Excel
                 <input type="file" accept=".xlsx,.xls,.csv" onchange="handleExcelUpload(event, '${dbSubTab}')" class="hidden" />
               </label>
               <button onclick="exportDatabaseExcel('${dbSubTab}')" class="px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-bold">📊 Export Excel</button>
+              <button onclick="saveAndOpenGoogleDrive()" class="px-3 py-2 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold">☁️ Simpan ke Drive</button>
               <button onclick="exportFullDatabaseJSON()" class="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold">💾 Backup JSON</button>
               ${dbSubTab === 'siswa' ? `<button onclick="openStudentModal(-1)" class="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold">+ Tambah Siswa</button>` : ''}
               ${dbSubTab === 'guru' ? `<button onclick="openStaffModal(-1, 'Guru')" class="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold">+ Tambah Guru</button>` : ''}
@@ -1826,33 +2101,14 @@
     }
 
     function renderCards() {
-      setTimeout(() => {
-        if (typeof JsBarcode === 'undefined') return;
-        document.querySelectorAll('.bc-svg').forEach(el => {
-          try {
-            JsBarcode(el, el.dataset.code, {
-              format: 'CODE128',
-              width: 1.8,
-              height: 44,
-              displayValue: true,
-              fontOptions: 'bold',
-              font: 'monospace',
-              textMargin: 4,
-              fontSize: 12,
-              margin: 4,
-              background: '#ffffff',
-              lineColor: '#0f172a'
-            });
-          } catch (err) {}
-        });
-      }, 50);
+      setTimeout(hydrateCardCodes, 60);
 
       return `
         <div class="space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 class="text-xl font-extrabold text-slate-900">Kartu Barcode Terkini (Siswa, Guru & Tendik)</h2>
-              <p class="text-xs text-slate-500">Format CODE128 presisi tinggi & QR cepat tanpa nama wali, siap diunduh PDF atau dicetak.</p>
+              <h2 class="text-xl font-extrabold text-slate-900">Kartu Barcode & QR Siswa, Guru & Tendik</h2>
+              <p class="text-xs text-slate-500">Desain kartu terkini dengan Barcode CODE128 + Kode QR, siap unduh PDF dan cetak.</p>
             </div>
             <div class="no-print flex flex-wrap gap-2">
               <button onclick="downloadBarcodePDF()" class="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold shadow-xs">📄 Download Barcode (PDF)</button>
@@ -1861,48 +2117,38 @@
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             ${db.students.map(s => `
-              <div class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                <div class="bg-gradient-to-r from-emerald-800 to-teal-700 px-4 py-2.5 flex justify-between items-center text-white">
-                  <div class="flex items-center gap-2">
-                    <span class="w-6 h-6 rounded-lg bg-amber-400 text-emerald-950 font-extrabold text-[10px] flex items-center justify-center">${escapeHtml(db.settings.schoolInitials)}</span>
-                    <span class="text-[11px] font-extrabold tracking-wide">${escapeHtml(db.settings.schoolName)}</span>
-                  </div>
-                  <span class="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-bold">${escapeHtml(s.kelas)}</span>
+              <div class="bg-white rounded-2xl border-2 border-emerald-700 p-4 space-y-2.5 shadow-xs">
+                <div class="flex justify-between items-center border-b border-emerald-100 pb-1.5">
+                  <span class="text-[11px] font-extrabold text-emerald-800">${escapeHtml(db.settings.schoolName)}</span>
+                  <span class="px-2 py-0.5 rounded bg-emerald-700 text-white text-[10px] font-bold">${escapeHtml(s.kelas)}</span>
                 </div>
-                <div class="p-4 space-y-2.5 flex-1 flex flex-col justify-between">
-                  <div class="flex items-start justify-between gap-2">
-                    <div>
-                      <p class="font-extrabold text-sm text-slate-900 leading-snug">${escapeHtml(s.nama)}</p>
-                      <p class="text-[11px] font-mono text-slate-500 mt-0.5">KARTU PELAJAR • ${escapeHtml(s.kelas)}</p>
-                    </div>
-                    <img alt="QR ${escapeHtml(s.nisn)}" src="https://api.qrserver.com/v1/create-qr-code/?size=72x72&margin=2&data=${encodeURIComponent(s.nisn)}" onerror="this.style.display='none'" class="w-12 h-12 rounded-xl border border-slate-200 p-0.5 bg-white shrink-0" />
-                  </div>
-                  <div class="bg-white rounded-2xl border border-slate-200 p-2.5 flex justify-center items-center">
+                <div>
+                  <p class="font-bold text-sm text-slate-900">${escapeHtml(s.nama)}</p>
+                  <p class="text-[11px] font-mono text-slate-500">NISN: ${escapeHtml(s.nisn)} • SISWA</p>
+                </div>
+                <div class="grid grid-cols-3 gap-2 items-center bg-slate-50 rounded-xl p-2 border border-slate-100">
+                  <div class="col-span-2 overflow-hidden flex justify-center">
                     <svg class="bc-svg max-w-full" data-code="${escapeHtml(s.nisn)}"></svg>
                   </div>
+                  <div class="qr-box flex justify-center items-center" data-code="${escapeHtml(s.nisn)}"></div>
                 </div>
               </div>
             `).join('')}
             ${db.staff.map(st => `
-              <div class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                <div class="bg-gradient-to-r from-indigo-800 to-slate-800 px-4 py-2.5 flex justify-between items-center text-white">
-                  <div class="flex items-center gap-2">
-                    <span class="w-6 h-6 rounded-lg bg-amber-400 text-slate-950 font-extrabold text-[10px] flex items-center justify-center">${escapeHtml(db.settings.schoolInitials)}</span>
-                    <span class="text-[11px] font-extrabold tracking-wide">${escapeHtml(db.settings.schoolName)}</span>
-                  </div>
-                  <span class="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-bold">${escapeHtml(st.kategori || 'Guru')}</span>
+              <div class="bg-white rounded-2xl border-2 border-indigo-700 p-4 space-y-2.5 shadow-xs">
+                <div class="flex justify-between items-center border-b border-indigo-100 pb-1.5">
+                  <span class="text-[11px] font-extrabold text-indigo-800">${escapeHtml(db.settings.schoolName)}</span>
+                  <span class="px-2 py-0.5 rounded bg-indigo-700 text-white text-[10px] font-bold">${escapeHtml(st.kategori || 'Guru')}</span>
                 </div>
-                <div class="p-4 space-y-2.5 flex-1 flex flex-col justify-between">
-                  <div class="flex items-start justify-between gap-2">
-                    <div>
-                      <p class="font-extrabold text-sm text-slate-900 leading-snug">${escapeHtml(st.nama)}</p>
-                      <p class="text-[11px] text-slate-500 mt-0.5">${escapeHtml(st.jabatan)}</p>
-                    </div>
-                    <img alt="QR ${escapeHtml(st.pegId)}" src="https://api.qrserver.com/v1/create-qr-code/?size=72x72&margin=2&data=${encodeURIComponent(st.pegId)}" onerror="this.style.display='none'" class="w-12 h-12 rounded-xl border border-slate-200 p-0.5 bg-white shrink-0" />
-                  </div>
-                  <div class="bg-white rounded-2xl border border-slate-200 p-2.5 flex justify-center items-center">
+                <div>
+                  <p class="font-bold text-sm text-slate-900">${escapeHtml(st.nama)}</p>
+                  <p class="text-[11px] text-slate-500">${escapeHtml(st.jabatan)}</p>
+                </div>
+                <div class="grid grid-cols-3 gap-2 items-center bg-slate-50 rounded-xl p-2 border border-slate-100">
+                  <div class="col-span-2 overflow-hidden flex justify-center">
                     <svg class="bc-svg max-w-full" data-code="${escapeHtml(st.pegId)}"></svg>
                   </div>
+                  <div class="qr-box flex justify-center items-center" data-code="${escapeHtml(st.pegId)}"></div>
                 </div>
               </div>
             `).join('')}
@@ -1960,7 +2206,6 @@
 
           <div class="pt-4 border-t border-slate-100 space-y-2.5">
             <h3 class="font-extrabold text-sm text-slate-900">Notifikasi & Konfirmasi WA Wali Murid</h3>
-            <p class="text-xs text-slate-500">Kirim konfirmasi kehadiran atau salinan izin langsung ke nomor WA wali murid terdaftar.</p>
             <div class="space-y-2">
               ${db.students.map(s => {
                 const todayAtt = db.attendance.find(a => a.tanggal === getTodayISO() && a.kode === s.nisn);
@@ -2120,9 +2365,6 @@
       `;
     }
 
-    /**
-     * Render utama aplikasi.
-     */
     function render() {
       try {
         const app = document.getElementById('app');
@@ -2156,6 +2398,10 @@
         else if (activeTab === 'walimurid') content = renderWaliMurid();
         else if (activeTab === 'reports') content = renderReports();
 
+        const syncLabel = (db.syncMeta && db.syncMeta.lastSyncAt)
+          ? `Sync ${escapeHtml(db.syncMeta.lastSyncAt)}`
+          : 'Sync & Drive';
+
         app.innerHTML = `
           <div class="min-h-screen flex flex-col pb-20 md:pb-6">
             <header class="no-print sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3">
@@ -2167,9 +2413,11 @@
                     <p class="text-[11px] text-slate-500">${escapeHtml(session.nama)} (${escapeHtml(session.role.toUpperCase())})</p>
                   </div>
                 </div>
-                <div class="flex items-center gap-1.5">
-                  <button onclick="toggleKiosk()" class="px-3 py-1.5 rounded-xl text-xs font-bold ${kioskLocked ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-700'}">${kioskLocked ? '🔒 Terkunci' : '🔓 Kios'}</button>
-                  ${!kioskLocked ? `<button onclick="logout()" class="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">Keluar</button>` : ''}
+                <div class="flex items-center gap-1.5 flex-wrap justify-end">
+                  <button type="button" onclick="openSyncModal()" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200">🔄 ${syncLabel}</button>
+                  <button type="button" onclick="saveAndOpenGoogleDrive()" class="hidden sm:inline-flex px-3 py-1.5 rounded-xl text-xs font-bold bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200">☁️ Drive</button>
+                  <button type="button" onclick="toggleKiosk()" class="px-3 py-1.5 rounded-xl text-xs font-bold ${kioskLocked ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-700'}">${kioskLocked ? '🔒 Terkunci' : '🔓 Kios'}</button>
+                  ${!kioskLocked ? `<button type="button" onclick="logout()" class="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">Keluar</button>` : ''}
                 </div>
               </div>
               ${!kioskLocked ? `
@@ -2197,26 +2445,39 @@
       }
     }
 
-    // Daftarkan service worker berbasis blob dengan scope relatif agar tidak 404 di subpath GitHub Pages
+    window.addEventListener('focus', () => {
+      if (db && db.syncMeta && db.syncMeta.cloudEnabled && db.syncMeta.autoSync) {
+        pullFromCloud({ silent: true, pushIfLocalNewer: true });
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && db && db.syncMeta && db.syncMeta.cloudEnabled && db.syncMeta.autoSync) {
+        pullFromCloud({ silent: true, pushIfLocalNewer: true });
+      }
+    });
+
     if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
       window.addEventListener('load', () => {
         try {
-          const swCode = `
-            self.addEventListener('install', () => self.skipWaiting());
-            self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
-          `;
-          const swBlob = new Blob([swCode], { type: 'application/javascript' });
-          const swUrl = URL.createObjectURL(swBlob);
-          navigator.serviceWorker.register(swUrl).catch(() => {});
+          navigator.serviceWorker.register('./sw.js').catch(() => {});
         } catch (err) {}
       });
     }
 
-    // Jalankan render pertama saat dokumen siap
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', render);
+      document.addEventListener('DOMContentLoaded', () => {
+        render();
+        if (db.syncMeta && db.syncMeta.cloudEnabled && db.syncMeta.autoSync) {
+          pullFromCloud({ silent: true, pushIfLocalNewer: true });
+        }
+      });
     } else {
       render();
+      if (db.syncMeta && db.syncMeta.cloudEnabled && db.syncMeta.autoSync) {
+        pullFromCloud({ silent: true, pushIfLocalNewer: true });
+      }
     }
   </script>
-
+</body>
+</html>
